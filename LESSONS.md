@@ -671,3 +671,88 @@ This means trade feedback works in both WebSocket mode and fallback polling mode
 
 ### No test changes needed
 This was a frontend-only change - the backend WebSocket API was already built in TODO-034. All 89 existing tests pass since they test the HTTP/REST API and business logic, not the WebSocket functionality.
+
+---
+
+## Inline Forms, Loading States, Connection Indicator (TODO-036) - 2026-02-04
+
+### HTMX inline form submission with custom headers
+Instead of returning `RedirectResponse` for form POSTs, HTMX requests can receive custom response headers that the client-side JavaScript interprets:
+- `HX-Toast-Success`: Display a green success toast notification
+- `HX-Toast-Error`: Display a red error toast notification
+
+Detection of HTMX requests:
+```python
+def is_htmx_request(request: Request) -> bool:
+    return request.headers.get("HX-Request") == "true"
+```
+
+The backend returns `HTMLResponse` with custom headers instead of redirects:
+```python
+if is_htmx_request(request):
+    return HTMLResponse(content="", headers={"HX-Toast-Success": msg})
+return RedirectResponse(...)  # Fallback for non-HTMX
+```
+
+This dual-path approach maintains backward compatibility - forms still work without JavaScript.
+
+### Loading states with CSS and HTMX
+HTMX adds the `htmx-request` class to elements during requests. Combine this with CSS to show/hide spinners:
+```css
+.btn-spinner { display: none; }
+.htmx-request .btn-spinner { display: inline-block; }
+.htmx-request .btn-text { display: none; }
+```
+
+Button disabling is handled in JavaScript:
+```javascript
+document.body.addEventListener('htmx:beforeRequest', function(event) {
+    const button = event.detail.elt.querySelector('button[type="submit"]');
+    if (button) button.disabled = true;
+});
+document.body.addEventListener('htmx:afterRequest', function(event) {
+    const button = event.detail.elt.querySelector('button[type="submit"]');
+    if (button) button.disabled = false;
+});
+```
+
+### Toast notifications with auto-removal
+Toast notifications use CSS animations for slide-in and fade-out:
+```css
+.toast {
+    animation: toast-in 0.3s ease-out, toast-out 0.3s ease-in 2.7s forwards;
+}
+```
+
+The second animation (toast-out) starts at 2.7s, leaving 0.3s for the fade-out before the 3-second JavaScript removal.
+
+### WebSocket connection indicator
+The connection indicator shows current status with color-coded dots:
+- **Green (connected)**: WebSocket live and working
+- **Green (polling)**: Fallback HTMX polling active
+- **Yellow (reconnecting)**: WebSocket reconnecting with backoff
+- **Red (disconnected)**: No connection
+
+The indicator updates in `connectWebSocket()` callbacks:
+```javascript
+ws.onopen = function() { updateConnectionStatus('connected'); };
+ws.onclose = function() { updateConnectionStatus('reconnecting'); };
+```
+
+### Form state preservation on error
+On success, clear the form inputs to prepare for the next order:
+```javascript
+if (successMsg && event.detail.elt.id === 'order-form') {
+    document.getElementById('price-input').value = '';
+    document.getElementById('quantity-input').value = '';
+}
+```
+
+On error, keep values so users can fix and retry without re-entering everything.
+
+### No test changes needed
+This TODO only changes:
+1. Frontend templates (CSS, JS, HTML)
+2. Backend response format for HTMX requests
+
+The endpoints still return the same redirects for non-HTMX requests, so all 89 existing tests pass unchanged.

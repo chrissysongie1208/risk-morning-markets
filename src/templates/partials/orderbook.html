@@ -21,9 +21,10 @@
                     <td>{{ order.remaining_quantity }}</td>
                     <td>
                         {% if order.user_id == user.id and market.status.value == 'OPEN' %}
-                        <form method="POST" action="/orders/{{ order.id }}/cancel" style="display:inline;">
+                        <form hx-post="/orders/{{ order.id }}/cancel" hx-swap="none" style="display:inline;">
                             <button type="submit" class="outline secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem;">
-                                Cancel
+                                <span class="btn-spinner spinner" style="width:0.7em;height:0.7em;border-width:1px;margin-right:0.25rem;"></span>
+                                <span class="btn-text">Cancel</span>
                             </button>
                         </form>
                         {% endif %}
@@ -58,9 +59,10 @@
                     <td>{{ order.remaining_quantity }}</td>
                     <td>
                         {% if order.user_id == user.id and market.status.value == 'OPEN' %}
-                        <form method="POST" action="/orders/{{ order.id }}/cancel" style="display:inline;">
+                        <form hx-post="/orders/{{ order.id }}/cancel" hx-swap="none" style="display:inline;">
                             <button type="submit" class="outline secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem;">
-                                Cancel
+                                <span class="btn-spinner spinner" style="width:0.7em;height:0.7em;border-width:1px;margin-right:0.25rem;"></span>
+                                <span class="btn-text">Cancel</span>
                             </button>
                         </form>
                         {% endif %}

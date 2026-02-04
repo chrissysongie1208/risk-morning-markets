@@ -22,7 +22,48 @@
     let audioContext = null;
     let soundEnabled = false;
 
-    // Initialize audio on first user interaction (required by browsers)
+    // ============ Toast Notifications ============
+    function showToast(message, isError) {
+        const container = document.getElementById('toast-container');
+        if (!container) return;
+
+        const toast = document.createElement('div');
+        toast.className = 'toast ' + (isError ? 'toast-error' : 'toast-success');
+        toast.textContent = message;
+        container.appendChild(toast);
+
+        // Remove after animation completes
+        setTimeout(function() {
+            toast.remove();
+        }, 3000);
+    }
+
+    // ============ Connection Status Indicator ============
+    function updateConnectionStatus(state) {
+        const statusDiv = document.getElementById('connection-status');
+        if (!statusDiv) return;
+
+        const dot = statusDiv.querySelector('.connection-dot');
+        const text = statusDiv.querySelector('.connection-text');
+
+        dot.classList.remove('connected', 'reconnecting', 'disconnected');
+
+        if (state === 'connected') {
+            dot.classList.add('connected');
+            text.textContent = 'Live';
+        } else if (state === 'reconnecting') {
+            dot.classList.add('reconnecting');
+            text.textContent = 'Reconnecting...';
+        } else if (state === 'polling') {
+            dot.classList.add('connected');
+            text.textContent = 'Polling';
+        } else {
+            dot.classList.add('disconnected');
+            text.textContent = 'Disconnected';
+        }
+    }
+
+    // ============ Audio Feedback ============
     function initAudio() {
         if (audioContext) return;
         try {
@@ -33,7 +74,6 @@
         }
     }
 
-    // Play a simple beep using Web Audio API
     function playBeep(isBuy) {
         if (!audioContext || !soundEnabled) return;
 
@@ -58,22 +98,16 @@
         }
     }
 
-    // Flash the position box
+    // ============ Position Flash Animation ============
     function flashPosition(isBuy) {
         const positionBox = document.getElementById('position-content');
         if (!positionBox) return;
 
-        // Remove any existing flash class
         positionBox.classList.remove('flash-buy', 'flash-sell');
-
-        // Force reflow to restart animation
-        void positionBox.offsetWidth;
-
-        // Add appropriate flash class
+        void positionBox.offsetWidth; // Force reflow to restart animation
         positionBox.classList.add(isBuy ? 'flash-buy' : 'flash-sell');
     }
 
-    // Check position change and trigger feedback
     function checkPositionChange() {
         const positionContent = document.getElementById('position-content');
         if (!positionContent) return;
@@ -96,9 +130,8 @@
         previousPosition = newPosition;
     }
 
-    // Update DOM from WebSocket HTML message
+    // ============ DOM Updates ============
     function updateFromWebSocket(html) {
-        // Parse the HTML response
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
@@ -108,7 +141,6 @@
             const positionTarget = document.getElementById('position-content');
             if (positionTarget) {
                 positionTarget.innerHTML = newPositionContent.innerHTML;
-                // Copy data attributes
                 for (const attr of newPositionContent.attributes) {
                     positionTarget.setAttribute(attr.name, attr.value);
                 }
@@ -133,30 +165,26 @@
             }
         }
 
-        // Check for position changes and trigger feedback
         checkPositionChange();
     }
 
-    // Calculate reconnect delay with exponential backoff
+    // ============ HTMX Polling Fallback ============
     function getReconnectDelay() {
         const delay = INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttempts);
         return Math.min(delay, MAX_RECONNECT_DELAY);
     }
 
-    // Disable HTMX polling
     function disablePolling() {
         const positionDiv = document.getElementById('position');
         if (positionDiv) {
             positionDiv.removeAttribute('hx-trigger');
             positionDiv.removeAttribute('hx-get');
-            // Re-process to remove existing polling
             if (typeof htmx !== 'undefined') {
                 htmx.process(positionDiv);
             }
         }
     }
 
-    // Enable HTMX polling (fallback)
     function enablePolling() {
         const positionDiv = document.getElementById('position');
         if (positionDiv) {
@@ -164,20 +192,19 @@
             positionDiv.setAttribute('hx-get', '/partials/market/' + marketId);
             positionDiv.setAttribute('hx-swap', 'innerHTML');
             positionDiv.setAttribute('hx-target', '#position-content');
-            // Re-process to start polling
             if (typeof htmx !== 'undefined') {
                 htmx.process(positionDiv);
             }
         }
+        updateConnectionStatus('polling');
     }
 
-    // Connect to WebSocket
+    // ============ WebSocket Connection ============
     function connectWebSocket() {
         if (ws && ws.readyState === WebSocket.OPEN) {
-            return; // Already connected
+            return;
         }
 
-        // Build WebSocket URL (wss for https, ws for http)
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = protocol + '//' + window.location.host + '/ws/market/' + marketId;
 
@@ -189,6 +216,7 @@
                 reconnectAttempts = 0;
                 usingWebSocket = true;
                 disablePolling();
+                updateConnectionStatus('connected');
             };
 
             ws.onmessage = function(event) {
@@ -225,25 +253,24 @@
 
                 // Don't reconnect if closed cleanly by server (e.g., market settled)
                 if (event.code === 1000) {
+                    updateConnectionStatus('disconnected');
                     return;
                 }
 
-                // Schedule reconnection with exponential backoff
+                updateConnectionStatus('reconnecting');
                 scheduleReconnect();
             };
 
             ws.onerror = function(error) {
                 console.log('WebSocket error:', error);
-                // onclose will be called after onerror, so reconnect is handled there
             };
         } catch (e) {
             console.log('WebSocket connection failed:', e);
             usingWebSocket = false;
-            enablePolling(); // Fall back to polling
+            enablePolling();
         }
     }
 
-    // Schedule reconnection with exponential backoff
     function scheduleReconnect() {
         if (reconnectTimeout) {
             clearTimeout(reconnectTimeout);
@@ -253,7 +280,6 @@
         console.log('Reconnecting in ' + (delay / 1000) + 's...');
         reconnectAttempts++;
 
-        // Enable polling as fallback while reconnecting
         if (!usingWebSocket) {
             enablePolling();
         }
@@ -263,25 +289,58 @@
         }, delay);
     }
 
-    // Enable audio on first click anywhere on page
-    document.addEventListener('click', initAudio, { once: true });
+    // ============ HTMX Event Handlers ============
+    // Handle HTMX responses for inline form submissions
+    document.body.addEventListener('htmx:beforeRequest', function(event) {
+        // Disable submit button during request
+        const button = event.detail.elt.querySelector('button[type="submit"]');
+        if (button) {
+            button.disabled = true;
+        }
+    });
 
-    // Listen for HTMX after-swap events (fallback mode)
+    document.body.addEventListener('htmx:afterRequest', function(event) {
+        // Re-enable submit button
+        const button = event.detail.elt.querySelector('button[type="submit"]');
+        if (button) {
+            button.disabled = false;
+        }
+
+        // Check for custom headers with toast messages
+        const xhr = event.detail.xhr;
+        if (!xhr) return;
+
+        const successMsg = xhr.getResponseHeader('HX-Toast-Success');
+        const errorMsg = xhr.getResponseHeader('HX-Toast-Error');
+
+        if (successMsg) {
+            showToast(successMsg, false);
+            // Clear the form on success (for order form)
+            if (event.detail.elt.id === 'order-form') {
+                document.getElementById('price-input').value = '';
+                document.getElementById('quantity-input').value = '';
+            }
+        } else if (errorMsg) {
+            showToast(errorMsg, true);
+            // Keep form values on error so user can fix and retry
+        }
+    });
+
+    // Handle position changes from HTMX polling (fallback mode)
     document.body.addEventListener('htmx:afterSwap', function(event) {
-        // Only process swaps that affect the position (when using HTMX polling)
         if (!event.detail.target || event.detail.target.id !== 'position-content') return;
-
         checkPositionChange();
     });
 
-    // Connect when DOM is ready
+    // ============ Initialization ============
+    document.addEventListener('click', initAudio, { once: true });
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', connectWebSocket);
     } else {
         connectWebSocket();
     }
 
-    // Clean up on page unload
     window.addEventListener('beforeunload', function() {
         if (ws) {
             ws.close(1000, 'Page unload');
@@ -292,9 +351,18 @@
 {% endblock %}
 
 {% block content %}
+<!-- Toast container for notifications -->
+<div id="toast-container" class="toast-container"></div>
+
 <article>
     <header>
-        <h1>{{ market.question }}</h1>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <h1>{{ market.question }}</h1>
+            <div id="connection-status" class="connection-indicator" style="margin-top: 0.5rem;">
+                <span class="connection-dot"></span>
+                <span class="connection-text">Connecting...</span>
+            </div>
+        </div>
         {% if market.description %}
             <p>{{ market.description }}</p>
         {% endif %}
@@ -317,7 +385,10 @@
     <!-- Order Placement Form -->
     <section>
         <h3>Place Order</h3>
-        <form method="POST" action="/markets/{{ market.id }}/orders">
+        <form id="order-form"
+              hx-post="/markets/{{ market.id }}/orders"
+              hx-swap="none"
+              hx-indicator="#order-submit-btn">
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 1rem; align-items: end;">
                 <label>
                     Side
@@ -328,13 +399,16 @@
                 </label>
                 <label>
                     Price
-                    <input type="number" name="price" step="0.01" min="0.01" required placeholder="100.00">
+                    <input type="number" name="price" id="price-input" step="0.01" min="0.01" required placeholder="100.00">
                 </label>
                 <label>
                     Quantity
-                    <input type="number" name="quantity" min="1" max="{{ position_limit }}" required placeholder="5">
+                    <input type="number" name="quantity" id="quantity-input" min="1" max="{{ position_limit }}" required placeholder="5">
                 </label>
-                <button type="submit">Submit Order</button>
+                <button type="submit" id="order-submit-btn">
+                    <span class="btn-spinner spinner"></span>
+                    <span class="btn-text">Submit Order</span>
+                </button>
             </div>
         </form>
         <small>Position limit: {{ position_limit }} lots. Your current position: {{ position.net_quantity if position else 0 }} lots.</small>

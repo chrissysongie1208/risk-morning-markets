@@ -89,6 +89,95 @@
         .own-order td {
             font-weight: 600;
         }
+
+        /* Toast notifications */
+        .toast-container {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .toast {
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            color: white;
+            font-size: 0.875rem;
+            animation: toast-in 0.3s ease-out, toast-out 0.3s ease-in 2.7s forwards;
+            max-width: 300px;
+        }
+        .toast-success {
+            background: #22c55e;
+        }
+        .toast-error {
+            background: #ef4444;
+        }
+        @keyframes toast-in {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes toast-out {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+
+        /* Loading spinner */
+        .spinner {
+            display: inline-block;
+            width: 1em;
+            height: 1em;
+            border: 2px solid currentColor;
+            border-right-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            margin-right: 0.5rem;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .htmx-request .spinner {
+            display: inline-block;
+        }
+        .btn-spinner {
+            display: none;
+        }
+        .htmx-request .btn-spinner {
+            display: inline-block;
+        }
+        .htmx-request .btn-text {
+            display: none;
+        }
+
+        /* Connection indicator */
+        .connection-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            color: var(--pico-muted-color);
+        }
+        .connection-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #6b7280;
+        }
+        .connection-dot.connected {
+            background: #22c55e;
+        }
+        .connection-dot.reconnecting {
+            background: #eab308;
+            animation: pulse 1s infinite;
+        }
+        .connection-dot.disconnected {
+            background: #ef4444;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
     </style>
     {% block extra_head %}{% endblock %}
 </head>

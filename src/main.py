@@ -255,8 +255,14 @@ async def market_detail(
 
 # ============ Order Routes ============
 
+def is_htmx_request(request: Request) -> bool:
+    """Check if request is from HTMX (inline form submission)."""
+    return request.headers.get("HX-Request") == "true"
+
+
 @app.post("/markets/{market_id}/orders")
 async def place_order(
+    request: Request,
     market_id: str,
     side: str = Form(...),
     price: float = Form(...),
@@ -266,12 +272,16 @@ async def place_order(
     """Place a new order on a market."""
     user = await auth.get_current_user(session)
     if not user:
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": "Session expired"})
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
     # Validate side
     try:
         order_side = OrderSide(side)
     except ValueError:
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": "Invalid order side"})
         return RedirectResponse(
             url=f"/markets/{market_id}?" + urlencode({"error": "Invalid order side"}),
             status_code=status.HTTP_303_SEE_OTHER
@@ -279,12 +289,16 @@ async def place_order(
 
     # Validate price and quantity
     if price <= 0:
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": "Price must be positive"})
         return RedirectResponse(
             url=f"/markets/{market_id}?" + urlencode({"error": "Price must be positive"}),
             status_code=status.HTTP_303_SEE_OTHER
         )
 
     if quantity <= 0:
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": "Quantity must be positive"})
         return RedirectResponse(
             url=f"/markets/{market_id}?" + urlencode({"error": "Quantity must be positive"}),
             status_code=status.HTTP_303_SEE_OTHER
@@ -300,8 +314,11 @@ async def place_order(
         )
 
         if result.rejected:
+            error_msg = result.reject_reason or "Order rejected"
+            if is_htmx_request(request):
+                return HTMLResponse(content="", headers={"HX-Toast-Error": error_msg})
             return RedirectResponse(
-                url=f"/markets/{market_id}?" + urlencode({"error": result.reject_reason or "Order rejected"}),
+                url=f"/markets/{market_id}?" + urlencode({"error": error_msg}),
                 status_code=status.HTTP_303_SEE_OTHER
             )
 
@@ -318,28 +335,37 @@ async def place_order(
         # Broadcast update to all WebSocket clients
         await broadcast_market_update(market_id)
 
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Success": msg})
         return RedirectResponse(
             url=f"/markets/{market_id}?" + urlencode({"success": msg}),
             status_code=status.HTTP_303_SEE_OTHER
         )
 
     except matching.MarketNotOpen:
+        error_msg = "Market is not open for trading"
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": error_msg})
         return RedirectResponse(
-            url=f"/markets/{market_id}?" + urlencode({"error": "Market is not open for trading"}),
+            url=f"/markets/{market_id}?" + urlencode({"error": error_msg}),
             status_code=status.HTTP_303_SEE_OTHER
         )
 
 
 @app.post("/orders/{order_id}/cancel")
-async def cancel_order(order_id: str, session: Optional[str] = Cookie(None)):
+async def cancel_order(request: Request, order_id: str, session: Optional[str] = Cookie(None)):
     """Cancel an open order."""
     user = await auth.get_current_user(session)
     if not user:
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": "Session expired"})
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
     # Get order to find market_id for redirect
     order = await db.get_order(order_id)
     if not order:
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": "Order not found"})
         raise HTTPException(status_code=404, detail="Order not found")
 
     market_id = order.market_id
@@ -351,17 +377,24 @@ async def cancel_order(order_id: str, session: Optional[str] = Cookie(None)):
             # Broadcast update to all WebSocket clients
             await broadcast_market_update(market_id)
 
+            if is_htmx_request(request):
+                return HTMLResponse(content="", headers={"HX-Toast-Success": "Order cancelled"})
             return RedirectResponse(
                 url=f"/markets/{market_id}?" + urlencode({"success": "Order cancelled"}),
                 status_code=status.HTTP_303_SEE_OTHER
             )
         else:
+            error_msg = "Could not cancel order (already filled or cancelled)"
+            if is_htmx_request(request):
+                return HTMLResponse(content="", headers={"HX-Toast-Error": error_msg})
             return RedirectResponse(
-                url=f"/markets/{market_id}?" + urlencode({"error": "Could not cancel order (already filled or cancelled)"}),
+                url=f"/markets/{market_id}?" + urlencode({"error": error_msg}),
                 status_code=status.HTTP_303_SEE_OTHER
             )
 
     except ValueError as e:
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": str(e)})
         return RedirectResponse(
             url=f"/markets/{market_id}?" + urlencode({"error": str(e)}),
             status_code=status.HTTP_303_SEE_OTHER
