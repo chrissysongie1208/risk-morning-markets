@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Join - Morning Markets{% endblock %}
+
+{% block content %}
+<article>
+    <header>
+        <h1>Welcome to Morning Markets</h1>
+        <p>A prediction market for trivia questions. Predict the answers and trade with others!</p>
+    </header>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+        <!-- Participant Join -->
+        <section>
+            <h2>Join as Participant</h2>
+            <p>Enter a display name to join the game. No password needed!</p>
+            <form method="POST" action="/join">
+                <label for="display_name">
+                    Display Name
+                    <input type="text" id="display_name" name="display_name"
+                           placeholder="Your name" required maxlength="50"
+                           autofocus>
+                </label>
+                <button type="submit">Join Game</button>
+            </form>
+        </section>
+
+        <!-- Admin Login -->
+        <section>
+            <h2>Admin Login</h2>
+            <p>Log in as admin to create and manage markets.</p>
+            <form method="POST" action="/admin/login">
+                <label for="username">
+                    Username
+                    <input type="text" id="username" name="username"
+                           placeholder="Username" required>
+                </label>
+                <label for="password">
+                    Password
+                    <input type="password" id="password" name="password"
+                           placeholder="Password" required>
+                </label>
+                <button type="submit" class="secondary">Admin Login</button>
+            </form>
+        </section>
+    </div>
+</article>
+{% endblock %}

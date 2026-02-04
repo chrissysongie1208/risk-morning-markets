@@ -1,0 +1,26 @@
+{% if trades %}
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Buyer</th>
+            <th>Seller</th>
+            <th>Price</th>
+            <th>Qty</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for trade in trades %}
+        <tr>
+            <td><small>{{ trade.created_at.strftime('%H:%M:%S') }}</small></td>
+            <td>{{ trade.buyer_name }}</td>
+            <td>{{ trade.seller_name }}</td>
+            <td>{{ "%.2f"|format(trade.price) }}</td>
+            <td>{{ trade.quantity }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p><small>No trades yet</small></p>
+{% endif %}

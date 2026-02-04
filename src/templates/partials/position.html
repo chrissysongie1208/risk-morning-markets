@@ -1,0 +1,11 @@
+{% if position and position.net_quantity != 0 %}
+<p>
+    <strong>{{ position.net_quantity }}</strong> lots
+    {% if position.net_quantity > 0 %}(LONG){% else %}(SHORT){% endif %}
+    {% if position.net_quantity != 0 %}
+        @ avg {{ "%.2f"|format(position.total_cost / position.net_quantity) }}
+    {% endif %}
+</p>
+{% else %}
+<p><small>No position</small></p>
+{% endif %}

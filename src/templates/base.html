@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Morning Markets{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        :root {
+            --pico-font-size: 16px;
+        }
+        .container {
+            max-width: 1000px;
+            padding: 1rem;
+        }
+        nav {
+            margin-bottom: 1rem;
+        }
+        .error {
+            color: var(--pico-del-color);
+            margin-bottom: 1rem;
+        }
+        .success {
+            color: var(--pico-ins-color);
+            margin-bottom: 1rem;
+        }
+        .market-status {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.875rem;
+            font-weight: bold;
+        }
+        .market-status.open {
+            background: var(--pico-ins-color);
+            color: white;
+        }
+        .market-status.closed {
+            background: var(--pico-mark-background-color);
+            color: var(--pico-color);
+        }
+        .market-status.settled {
+            background: var(--pico-secondary);
+            color: white;
+        }
+        .bid { color: #22c55e; }
+        .offer { color: #ef4444; }
+        .win { color: #22c55e; font-weight: bold; }
+        .loss { color: #ef4444; font-weight: bold; }
+        .breakeven { color: #6b7280; font-weight: bold; }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <main class="container">
+        <nav>
+            <ul>
+                <li><strong>Morning Markets</strong></li>
+            </ul>
+            <ul>
+                {% if user %}
+                    <li><a href="/markets">Markets</a></li>
+                    <li><a href="/leaderboard">Leaderboard</a></li>
+                    {% if user.is_admin %}
+                        <li><a href="/admin">Admin</a></li>
+                    {% endif %}
+                    <li><small>{{ user.display_name }}</small></li>
+                {% else %}
+                    <li><a href="/">Join</a></li>
+                {% endif %}
+            </ul>
+        </nav>
+
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

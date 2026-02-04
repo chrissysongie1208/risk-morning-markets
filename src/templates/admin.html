@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Panel - Morning Markets{% endblock %}
+
+{% block content %}
+<h1>Admin Panel</h1>
+
+{% if success %}
+    <p class="success">{{ success }}</p>
+{% endif %}
+{% if error %}
+    <p class="error">{{ error }}</p>
+{% endif %}
+
+<!-- Create Market Form -->
+<article>
+    <header>
+        <h2>Create New Market</h2>
+    </header>
+    <form method="POST" action="/admin/markets">
+        <label for="question">
+            Question
+            <input type="text" id="question" name="question"
+                   placeholder="e.g., Weight of largest recorded polar bear in kg?"
+                   required maxlength="500">
+        </label>
+        <label for="description">
+            Description (optional)
+            <textarea id="description" name="description"
+                      placeholder="Additional context or hints..."
+                      maxlength="2000" rows="3"></textarea>
+        </label>
+        <button type="submit">Create Market</button>
+    </form>
+</article>
+
+<!-- Open/Active Markets Management -->
+<article>
+    <header>
+        <h2>Manage Markets</h2>
+    </header>
+
+    {% if not markets %}
+        <p>No markets created yet.</p>
+    {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Question</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for market in markets %}
+                <tr>
+                    <td>
+                        <strong>{{ market.question[:60] }}{% if market.question|length > 60 %}...{% endif %}</strong>
+                    </td>
+                    <td>
+                        <span class="market-status {{ market.status.value|lower }}">
+                            {{ market.status.value }}
+                        </span>
+                        {% if market.status.value == 'SETTLED' %}
+                            <br><small>{{ market.settlement_value }}</small>
+                        {% endif %}
+                    </td>
+                    <td><small>{{ market.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                    <td>
+                        {% if market.status.value == 'OPEN' %}
+                            <form method="POST" action="/admin/markets/{{ market.id }}/close" style="display:inline;">
+                                <button type="submit" class="secondary outline"
+                                        onclick="return confirm('Close this market? No new orders will be accepted.')">
+                                    Close
+                                </button>
+                            </form>
+                        {% elif market.status.value == 'CLOSED' %}
+                            <a href="/admin/markets/{{ market.id }}/settle" role="button" class="outline">
+                                Settle
+                            </a>
+                        {% else %}
+                            <a href="/markets/{{ market.id }}/results" role="button" class="outline">
+                                Results
+                            </a>
+                        {% endif %}
+                        <a href="/markets/{{ market.id }}" role="button" class="outline secondary">View</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</article>
+
+<!-- Position Limit Config -->
+<article>
+    <header>
+        <h2>Configuration</h2>
+    </header>
+    <form method="POST" action="/admin/config">
+        <label for="position_limit">
+            Position Limit (max lots per user)
+            <input type="number" id="position_limit" name="position_limit"
+                   value="{{ position_limit }}" min="1" max="1000" required>
+        </label>
+        <button type="submit" class="secondary">Update Limit</button>
+    </form>
+    <small>Current position limit: {{ position_limit }} lots</small>
+</article>
+
+<footer>
+    <p><a href="/markets">← Back to Markets</a></p>
+</footer>
+{% endblock %}

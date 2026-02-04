@@ -1,0 +1,75 @@
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+    <!-- Bids -->
+    <div>
+        <h4 class="bid">Bids (Buy Orders)</h4>
+        {% if bids %}
+        <table>
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Price</th>
+                    <th>Qty</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for order in bids %}
+                <tr>
+                    <td>{{ order.display_name }}</td>
+                    <td class="bid">{{ "%.2f"|format(order.price) }}</td>
+                    <td>{{ order.remaining_quantity }}</td>
+                    <td>
+                        {% if order.user_id == user.id and market.status.value == 'OPEN' %}
+                        <form method="POST" action="/orders/{{ order.id }}/cancel" style="display:inline;">
+                            <button type="submit" class="outline secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem;">
+                                Cancel
+                            </button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p><small>No bids</small></p>
+        {% endif %}
+    </div>
+
+    <!-- Offers -->
+    <div>
+        <h4 class="offer">Offers (Sell Orders)</h4>
+        {% if offers %}
+        <table>
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Price</th>
+                    <th>Qty</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for order in offers %}
+                <tr>
+                    <td>{{ order.display_name }}</td>
+                    <td class="offer">{{ "%.2f"|format(order.price) }}</td>
+                    <td>{{ order.remaining_quantity }}</td>
+                    <td>
+                        {% if order.user_id == user.id and market.status.value == 'OPEN' %}
+                        <form method="POST" action="/orders/{{ order.id }}/cancel" style="display:inline;">
+                            <button type="submit" class="outline secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem;">
+                                Cancel
+                            </button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p><small>No offers</small></p>
+        {% endif %}
+    </div>
+</div>

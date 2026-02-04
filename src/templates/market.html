@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}{{ market.question[:50] }} - Morning Markets{% endblock %}
+
+{% block content %}
+<article>
+    <header>
+        <h1>{{ market.question }}</h1>
+        {% if market.description %}
+            <p>{{ market.description }}</p>
+        {% endif %}
+        <p>
+            <span class="market-status {{ market.status.value|lower }}">{{ market.status.value }}</span>
+            {% if market.status.value == 'SETTLED' %}
+                | Settlement Value: <strong>{{ market.settlement_value }}</strong>
+            {% endif %}
+        </p>
+    </header>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+    {% if success %}
+        <p class="success">{{ success }}</p>
+    {% endif %}
+
+    {% if market.status.value == 'OPEN' %}
+    <!-- Order Placement Form -->
+    <section>
+        <h3>Place Order</h3>
+        <form method="POST" action="/markets/{{ market.id }}/orders">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 1rem; align-items: end;">
+                <label>
+                    Side
+                    <select name="side" required>
+                        <option value="BID">BID (Buy)</option>
+                        <option value="OFFER">OFFER (Sell)</option>
+                    </select>
+                </label>
+                <label>
+                    Price
+                    <input type="number" name="price" step="0.01" min="0.01" required placeholder="100.00">
+                </label>
+                <label>
+                    Quantity
+                    <input type="number" name="quantity" min="1" max="{{ position_limit }}" required placeholder="5">
+                </label>
+                <button type="submit">Submit Order</button>
+            </div>
+        </form>
+        <small>Position limit: {{ position_limit }} lots. Your current position: {{ position.net_quantity if position else 0 }} lots.</small>
+    </section>
+    {% elif market.status.value == 'CLOSED' %}
+    <p><em>This market is closed. Waiting for settlement.</em></p>
+    {% else %}
+    <p><em>This market has been settled. <a href="/markets/{{ market.id }}/results">View Results</a></em></p>
+    {% endif %}
+
+    <!-- Current Position (HTMX polling every 1 second) -->
+    <section>
+        <h3>Your Position</h3>
+        <div id="position"
+             hx-get="/partials/position/{{ market.id }}"
+             hx-trigger="every 1s"
+             hx-swap="innerHTML">
+            {% include 'partials/position.html' %}
+        </div>
+    </section>
+
+    <!-- Order Book (HTMX polling every 1 second) -->
+    <section>
+        <h3>Order Book</h3>
+        <div id="orderbook"
+             hx-get="/partials/orderbook/{{ market.id }}"
+             hx-trigger="every 1s"
+             hx-swap="innerHTML">
+            {% include 'partials/orderbook.html' %}
+        </div>
+    </section>
+
+    <!-- Recent Trades (HTMX polling every 1 second) -->
+    <section>
+        <h3>Recent Trades</h3>
+        <div id="trades"
+             hx-get="/partials/trades/{{ market.id }}"
+             hx-trigger="every 1s"
+             hx-swap="innerHTML">
+            {% include 'partials/trades.html' %}
+        </div>
+    </section>
+</article>
+
+<footer>
+    <p><a href="/markets">← Back to Markets</a></p>
+</footer>
+{% endblock %}

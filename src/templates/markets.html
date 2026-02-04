@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Markets - Morning Markets{% endblock %}
+
+{% block content %}
+<h1>Markets</h1>
+
+{% if user.is_admin %}
+    <p><a href="/admin" role="button" class="secondary outline">Admin Panel</a></p>
+{% endif %}
+
+{% if not markets %}
+    <p>No markets available yet. {% if user.is_admin %}Create one from the Admin Panel.{% endif %}</p>
+{% else %}
+    <table>
+        <thead>
+            <tr>
+                <th>Question</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for market in markets %}
+            <tr>
+                <td>
+                    <strong>{{ market.question }}</strong>
+                    {% if market.description %}
+                        <br><small>{{ market.description[:100] }}{% if market.description|length > 100 %}...{% endif %}</small>
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="market-status {{ market.status.value|lower }}">
+                        {{ market.status.value }}
+                    </span>
+                    {% if market.status.value == 'SETTLED' %}
+                        <br><small>Value: {{ market.settlement_value }}</small>
+                    {% endif %}
+                </td>
+                <td><small>{{ market.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                <td>
+                    {% if market.status.value == 'SETTLED' %}
+                        <a href="/markets/{{ market.id }}/results" role="button" class="outline">Results</a>
+                    {% else %}
+                        <a href="/markets/{{ market.id }}" role="button">Trade</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% endif %}
+
+<footer>
+    <p><a href="/logout">Logout</a></p>
+</footer>
+{% endblock %}

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Results: {{ market.question[:50] }} - Morning Markets{% endblock %}
+
+{% block content %}
+<h1>Market Results</h1>
+
+<article>
+    <header>
+        <h2>{{ market.question }}</h2>
+        {% if market.description %}
+            <p>{{ market.description }}</p>
+        {% endif %}
+    </header>
+
+    <p>
+        <strong>Settlement Value:</strong> {{ market.settlement_value }}
+    </p>
+    <p>
+        <strong>Settled:</strong> {{ market.settled_at.strftime('%Y-%m-%d %H:%M') if market.settled_at else 'N/A' }}
+    </p>
+</article>
+
+<article>
+    <header>
+        <h2>Results by User</h2>
+    </header>
+
+    {% if not results %}
+        <p>No positions recorded for this market.</p>
+    {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Position</th>
+                    <th>Avg Price</th>
+                    <th>Linear P&L</th>
+                    <th>Binary P&L</th>
+                    <th>Result</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for result in results %}
+                <tr>
+                    <td>{{ result.display_name }}</td>
+                    <td>
+                        {% if result.net_quantity > 0 %}
+                            <span class="bid">+{{ result.net_quantity }} (Long)</span>
+                        {% elif result.net_quantity < 0 %}
+                            <span class="offer">{{ result.net_quantity }} (Short)</span>
+                        {% else %}
+                            <span>0 (Flat)</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if result.avg_price is not none %}
+                            {{ "%.2f"|format(result.avg_price) }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if result.linear_pnl is not none %}
+                            {% if result.linear_pnl > 0 %}
+                                <span class="win">+{{ "%.2f"|format(result.linear_pnl) }}</span>
+                            {% elif result.linear_pnl < 0 %}
+                                <span class="loss">{{ "%.2f"|format(result.linear_pnl) }}</span>
+                            {% else %}
+                                <span>0.00</span>
+                            {% endif %}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if result.binary_pnl > 0 %}
+                            <span class="win">+{{ result.binary_pnl }} lots</span>
+                        {% elif result.binary_pnl < 0 %}
+                            <span class="loss">{{ result.binary_pnl }} lots</span>
+                        {% else %}
+                            <span>0 lots</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if result.binary_result %}
+                            {% if result.binary_result.value == 'WIN' %}
+                                <span class="win">WIN</span>
+                            {% elif result.binary_result.value == 'LOSS' %}
+                                <span class="loss">LOSS</span>
+                            {% else %}
+                                <span class="breakeven">BREAKEVEN</span>
+                            {% endif %}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+</article>
+
+<footer>
+    <p>
+        <a href="/markets">← Back to Markets</a>
+        {% if user.is_admin %}
+            | <a href="/admin">Admin Panel</a>
+        {% endif %}
+        | <a href="/leaderboard">View Leaderboard</a>
+    </p>
+</footer>
+{% endblock %}

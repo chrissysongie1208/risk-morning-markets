@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Leaderboard - Morning Markets{% endblock %}
+
+{% block content %}
+<h1>Leaderboard</h1>
+
+<p>Aggregate results across all settled markets.</p>
+
+{% if not entries %}
+    <article>
+        <p>No settled markets yet. Trade in some markets and check back after they settle!</p>
+    </article>
+{% else %}
+    <table>
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Player</th>
+                <th>Linear P&L</th>
+                <th>Binary P&L</th>
+                <th>Markets</th>
+                <th>Wins</th>
+                <th>Losses</th>
+                <th>Win Rate</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in entries %}
+            <tr>
+                <td>
+                    {% if loop.index == 1 %}
+                        <strong>1</strong>
+                    {% elif loop.index == 2 %}
+                        <strong>2</strong>
+                    {% elif loop.index == 3 %}
+                        <strong>3</strong>
+                    {% else %}
+                        {{ loop.index }}
+                    {% endif %}
+                </td>
+                <td>
+                    <strong>{{ entry.display_name }}</strong>
+                </td>
+                <td class="{% if entry.total_linear_pnl > 0 %}win{% elif entry.total_linear_pnl < 0 %}loss{% else %}breakeven{% endif %}">
+                    {% if entry.total_linear_pnl >= 0 %}+{% endif %}{{ "%.2f"|format(entry.total_linear_pnl) }}
+                </td>
+                <td class="{% if entry.total_binary_pnl > 0 %}win{% elif entry.total_binary_pnl < 0 %}loss{% else %}breakeven{% endif %}">
+                    {% if entry.total_binary_pnl >= 0 %}+{% endif %}{{ entry.total_binary_pnl }} lots
+                </td>
+                <td>{{ entry.markets_traded }}</td>
+                <td class="win">{{ entry.wins }}</td>
+                <td class="loss">{{ entry.losses }}</td>
+                <td>
+                    {% set total_decided = entry.wins + entry.losses %}
+                    {% if total_decided > 0 %}
+                        {{ "%.0f"|format(entry.wins / total_decided * 100) }}%
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% endif %}
+
+<footer>
+    <p><a href="/markets">&larr; Back to Markets</a></p>
+</footer>
+{% endblock %}

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Settle: {{ market.question[:50] }} - Morning Markets{% endblock %}
+
+{% block content %}
+<h1>Settle Market</h1>
+
+{% if success %}
+    <p class="success">{{ success }}</p>
+{% endif %}
+{% if error %}
+    <p class="error">{{ error }}</p>
+{% endif %}
+
+<article>
+    <header>
+        <h2>{{ market.question }}</h2>
+        {% if market.description %}
+            <p>{{ market.description }}</p>
+        {% endif %}
+    </header>
+
+    <p>
+        <strong>Status:</strong>
+        <span class="market-status {{ market.status.value|lower }}">{{ market.status.value }}</span>
+    </p>
+    <p>
+        <strong>Created:</strong> {{ market.created_at.strftime('%Y-%m-%d %H:%M') }}
+    </p>
+
+    {% if positions %}
+    <h3>Current Positions</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>User</th>
+                <th>Position</th>
+                <th>Total Cost</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for pos in positions %}
+            <tr>
+                <td>{{ pos.display_name }}</td>
+                <td>
+                    {% if pos.net_quantity > 0 %}
+                        <span class="bid">+{{ pos.net_quantity }}</span>
+                    {% elif pos.net_quantity < 0 %}
+                        <span class="offer">{{ pos.net_quantity }}</span>
+                    {% else %}
+                        <span>0</span>
+                    {% endif %}
+                </td>
+                <td>{{ "%.2f"|format(pos.total_cost) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No positions recorded for this market.</p>
+    {% endif %}
+</article>
+
+<article>
+    <header>
+        <h2>Enter Settlement Value</h2>
+    </header>
+
+    <form method="POST" action="/admin/markets/{{ market.id }}/settle">
+        <label for="settlement_value">
+            Settlement Value (the actual answer)
+            <input type="number" id="settlement_value" name="settlement_value"
+                   step="any" required placeholder="e.g., 1002 for polar bear weight">
+        </label>
+        <button type="submit"
+                onclick="return confirm('Settle this market? This action cannot be undone.')">
+            Settle Market
+        </button>
+    </form>
+
+    <small>
+        After settling, users will see their P&L calculated as:<br>
+        <code>Linear P&L = position * (settlement_value - avg_price)</code>
+    </small>
+</article>
+
+<footer>
+    <p>
+        <a href="/admin">← Back to Admin</a> |
+        <a href="/markets/{{ market.id }}">View Market</a>
+    </p>
+</footer>
+{% endblock %}
