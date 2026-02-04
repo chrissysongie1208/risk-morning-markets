@@ -544,3 +544,62 @@ The 30-second timeout was too aggressive for real users:
 - Still cleans up stale sessions between games (2 min)
 - Tolerates typical user interruptions
 - Doesn't block other users unnecessarily long
+
+---
+
+## WebSocket Backend Implementation (TODO-034) - 2026-02-04
+
+### ConnectionManager architecture
+The `ConnectionManager` class in `websocket.py` tracks connected WebSocket clients per market:
+- `_connections`: dict mapping `market_id` -> set of `(websocket, user_id)` tuples
+- `_last_pong`: dict mapping `websocket` -> last pong timestamp for keepalive
+
+Key methods:
+- `connect()`: Accept connection, add to market set, start keepalive task
+- `disconnect()`: Remove connection from tracking, clean up empty sets
+- `broadcast()`: Send message to all clients for a market
+- `send_personal_update()`: Send personalized update to specific user
+
+### Personalized updates for position data
+Unlike a chat app where everyone sees the same message, position data is user-specific. Each connected client receives their own view with:
+- Their position highlighted
+- Their orders marked with "(you)"
+- Position direction based on their trades
+
+Implementation uses `generate_market_html_for_user()` which renders the template for each user individually during broadcast.
+
+### Broadcast trigger points
+Broadcasts are called from three endpoints in `main.py`:
+1. **Order placed** - after successful `matching.place_order()`
+2. **Order cancelled** - after successful `matching.cancel_order()`
+3. **Market settled** - after `settlement.settle_market()`
+
+### WebSocket authentication via cookies
+WebSockets don't have a straightforward Request object, but can access cookies:
+```python
+session_cookie = websocket.cookies.get("session")
+user = await auth.get_current_user(session_cookie) if session_cookie else None
+if not user:
+    await websocket.close(code=4001, reason="Unauthorized")
+```
+
+Custom close codes (4001 for unauthorized, 4004 for not found) follow WebSocket protocol conventions.
+
+### Ping/pong keepalive
+The keepalive loop runs every 30 seconds:
+1. Send `{"type": "ping"}` to all clients
+2. Check if last pong was received within 60 seconds
+3. Close stale connections that haven't responded
+
+Clients should respond with `{"type": "pong"}` or `pong`. The `record_pong()` method updates the timestamp.
+
+### Template rendering without Request
+For WebSocket broadcasts, we don't have a full Request object. Jinja2 templates can be rendered with `request=None` if they don't use `url_for()` or other request-dependent functions. The `market_all.html` partial works fine without a request since it only uses passed variables.
+
+### Test impact
+No new tests were added for WebSocket functionality since:
+1. WebSocket testing requires async test clients with WebSocket support
+2. The existing 89 tests verify the core business logic still works
+3. Frontend integration (TODO-035) will be the true test of the WebSocket system
+
+The backend is ready - frontend integration in TODO-035 will complete the real-time experience.

@@ -5,10 +5,12 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, Request, Form, Cookie, HTTPException, status
+from fastapi import FastAPI, Request, Form, Cookie, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+
+from websocket import manager as ws_manager
 
 import database as db
 import auth
@@ -313,6 +315,9 @@ async def place_order(
         else:
             msg = f"Order placed: {quantity} lots @ {price}"
 
+        # Broadcast update to all WebSocket clients
+        await broadcast_market_update(market_id)
+
         return RedirectResponse(
             url=f"/markets/{market_id}?" + urlencode({"success": msg}),
             status_code=status.HTTP_303_SEE_OTHER
@@ -343,6 +348,9 @@ async def cancel_order(order_id: str, session: Optional[str] = Cookie(None)):
         success = await matching.cancel_order(order_id, user.id)
 
         if success:
+            # Broadcast update to all WebSocket clients
+            await broadcast_market_update(market_id)
+
             return RedirectResponse(
                 url=f"/markets/{market_id}?" + urlencode({"success": "Order cancelled"}),
                 status_code=status.HTTP_303_SEE_OTHER
@@ -668,6 +676,10 @@ async def settle_market_action(
 
     try:
         await settlement.settle_market(market_id, settlement_value)
+
+        # Broadcast update to all WebSocket clients (will trigger redirect to results)
+        await broadcast_market_update(market_id)
+
         return RedirectResponse(
             url=f"/markets/{market_id}/results",
             status_code=status.HTTP_303_SEE_OTHER
@@ -953,6 +965,159 @@ async def leaderboard(request: Request, session: Optional[str] = Cookie(None)):
             "entries": entries
         }
     )
+
+
+# ============ WebSocket Routes ============
+
+async def generate_market_html_for_user(market_id: str, user_id: str) -> str:
+    """Generate HTML update for a market to send via WebSocket.
+
+    Returns the same content as the combined partial endpoint.
+    """
+    market = await db.get_market(market_id)
+    if not market:
+        return '<div id="position-content"><p>Market not found.</p></div>'
+
+    # Check if market is settled - send redirect instruction
+    if market.status == MarketStatus.SETTLED:
+        return f'{{"type": "redirect", "url": "/markets/{market_id}/results"}}'
+
+    # Get user for context
+    user = await db.get_user_by_id(user_id)
+    if not user:
+        return '<div id="position-content"><p>Session expired.</p></div>'
+
+    # Get order book
+    bids = await db.get_open_orders(market_id, side=OrderSide.BID)
+    offers = await db.get_open_orders(market_id, side=OrderSide.OFFER)
+
+    # Enrich orders with user display names
+    bids_with_users = []
+    for order in bids:
+        order_user = await db.get_user_by_id(order.user_id)
+        bids_with_users.append(OrderWithUser(
+            id=order.id,
+            user_id=order.user_id,
+            display_name=order_user.display_name if order_user else "Unknown",
+            side=order.side,
+            price=order.price,
+            quantity=order.quantity,
+            remaining_quantity=order.remaining_quantity,
+            status=order.status,
+            created_at=order.created_at
+        ))
+
+    offers_with_users = []
+    for order in offers:
+        order_user = await db.get_user_by_id(order.user_id)
+        offers_with_users.append(OrderWithUser(
+            id=order.id,
+            user_id=order.user_id,
+            display_name=order_user.display_name if order_user else "Unknown",
+            side=order.side,
+            price=order.price,
+            quantity=order.quantity,
+            remaining_quantity=order.remaining_quantity,
+            status=order.status,
+            created_at=order.created_at
+        ))
+
+    # Get recent trades
+    recent_trades = await db.get_recent_trades(market_id, limit=10)
+    trades_with_users = []
+    for trade in recent_trades:
+        buyer = await db.get_user_by_id(trade.buyer_id)
+        seller = await db.get_user_by_id(trade.seller_id)
+        trades_with_users.append(TradeWithUsers(
+            id=trade.id,
+            buyer_name=buyer.display_name if buyer else "Unknown",
+            seller_name=seller.display_name if seller else "Unknown",
+            price=trade.price,
+            quantity=trade.quantity,
+            created_at=trade.created_at
+        ))
+
+    # Get user's position
+    position = await db.get_position(market_id, user_id)
+
+    # Render the template (without request - use None for url_for if needed)
+    return templates.get_template("partials/market_all.html").render(
+        request=None,
+        user=user,
+        market=market,
+        bids=bids_with_users,
+        offers=offers_with_users,
+        trades=trades_with_users,
+        position=position
+    )
+
+
+async def broadcast_market_update(market_id: str):
+    """Broadcast market update to all connected WebSocket clients.
+
+    Each client receives a personalized HTML update based on their user_id.
+    """
+    # Get all connected users for this market
+    if market_id not in ws_manager._connections:
+        return
+
+    for websocket, user_id in list(ws_manager._connections[market_id]):
+        try:
+            html = await generate_market_html_for_user(market_id, user_id)
+            await ws_manager.send_personal_update(market_id, user_id, html)
+        except Exception:
+            # Connection error, will be cleaned up by manager
+            pass
+
+
+@app.websocket("/ws/market/{market_id}")
+async def websocket_market(websocket: WebSocket, market_id: str):
+    """WebSocket endpoint for real-time market updates.
+
+    Clients connect to receive push updates instead of polling.
+    Supports ping/pong keepalive for stale connection detection.
+    """
+    # Get user from cookie (need to parse manually for WebSocket)
+    session_cookie = websocket.cookies.get("session")
+    user = await auth.get_current_user(session_cookie) if session_cookie else None
+
+    if not user:
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+
+    # Verify market exists
+    market = await db.get_market(market_id)
+    if not market:
+        await websocket.close(code=4004, reason="Market not found")
+        return
+
+    # Connect
+    await ws_manager.connect(websocket, market_id, user.id)
+
+    # Update user activity for session tracking
+    await db.update_user_activity(user.id)
+
+    # Send initial state
+    try:
+        html = await generate_market_html_for_user(market_id, user.id)
+        await websocket.send_text(html)
+    except Exception:
+        ws_manager.disconnect(websocket, market_id, user.id)
+        return
+
+    # Listen for messages (pong responses)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            # Handle pong response
+            if data == '{"type": "pong"}' or data == 'pong':
+                ws_manager.record_pong(websocket)
+            # Update user activity on any message
+            await db.update_user_activity(user.id)
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket, market_id, user.id)
+    except Exception:
+        ws_manager.disconnect(websocket, market_id, user.id)
 
 
 if __name__ == "__main__":
