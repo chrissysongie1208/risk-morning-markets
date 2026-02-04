@@ -597,7 +597,7 @@ async def settle_market_page(
     error: Optional[str] = None,
     success: Optional[str] = None
 ):
-    """Admin page to settle a market."""
+    """Admin page to settle a market (can settle OPEN or CLOSED markets)."""
     user = await auth.get_current_user(session)
     if not user:
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
@@ -607,6 +607,13 @@ async def settle_market_page(
     market = await db.get_market(market_id)
     if not market:
         raise HTTPException(status_code=404, detail="Market not found")
+
+    # Can only settle OPEN or CLOSED markets
+    if market.status == MarketStatus.SETTLED:
+        return RedirectResponse(
+            url=f"/markets/{market_id}/results",
+            status_code=status.HTTP_303_SEE_OTHER
+        )
 
     # Get positions for preview
     positions = await db.get_all_positions(market_id)

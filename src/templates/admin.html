@@ -68,14 +68,7 @@
                     </td>
                     <td><small>{{ market.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
                     <td>
-                        {% if market.status.value == 'OPEN' %}
-                            <form method="POST" action="/admin/markets/{{ market.id }}/close" style="display:inline;">
-                                <button type="submit" class="secondary outline"
-                                        onclick="return confirm('Close this market? No new orders will be accepted.')">
-                                    Close
-                                </button>
-                            </form>
-                        {% elif market.status.value == 'CLOSED' %}
+                        {% if market.status.value == 'OPEN' or market.status.value == 'CLOSED' %}
                             <a href="/admin/markets/{{ market.id }}/settle" role="button" class="outline">
                                 Settle
                             </a>

@@ -73,12 +73,15 @@
                    step="any" required placeholder="e.g., 1002 for polar bear weight">
         </label>
         <button type="submit"
-                onclick="return confirm('Settle this market? This action cannot be undone.')">
+                onclick="return confirm('Settle this market? This will close the market (cancelling all open orders) and calculate final P&L. This action cannot be undone.')">
             Settle Market
         </button>
     </form>
 
     <small>
+        {% if market.status.value == 'OPEN' %}
+        <strong>Note:</strong> Settling will automatically close the market and cancel all open orders.<br><br>
+        {% endif %}
         After settling, users will see their P&L calculated as:<br>
         <code>Linear P&L = position * (settlement_value - avg_price)</code>
     </small>

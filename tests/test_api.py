@@ -570,6 +570,59 @@ async def test_settle_market_as_admin(admin_client):
     assert updated_market.settlement_value == 100.0
 
 
+@pytest.mark.asyncio
+async def test_settle_open_market_cancels_orders(admin_client):
+    """POST /admin/markets/{id}/settle on OPEN market -> orders cancelled, market settled"""
+    # Create a market (starts as OPEN)
+    await admin_client.post(
+        "/admin/markets",
+        data={"question": "Settle open market test?"},
+        follow_redirects=True
+    )
+
+    # Find the market
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "Settle open market test" in m.question), None)
+    assert market is not None
+    assert market.status.value == "OPEN"
+
+    # Place some orders that should be cancelled on settle
+    await admin_client.post(
+        f"/markets/{market.id}/orders",
+        data={"side": "BID", "price": "95", "quantity": "5"},
+        follow_redirects=True
+    )
+    await admin_client.post(
+        f"/markets/{market.id}/orders",
+        data={"side": "OFFER", "price": "105", "quantity": "5"},
+        follow_redirects=True
+    )
+
+    # Verify orders exist
+    open_orders = await db.get_open_orders(market.id)
+    assert len(open_orders) == 2
+
+    # Settle the OPEN market directly (without closing first)
+    response = await admin_client.post(
+        f"/admin/markets/{market.id}/settle",
+        data={"settlement_value": "100"},
+        follow_redirects=False
+    )
+
+    # Should redirect to results page
+    assert response.status_code == 303
+    assert f"/markets/{market.id}/results" in response.headers["location"]
+
+    # Verify market is settled (went from OPEN directly to SETTLED)
+    updated_market = await db.get_market(market.id)
+    assert updated_market.status.value == "SETTLED"
+    assert updated_market.settlement_value == 100.0
+
+    # Verify open orders were cancelled
+    open_orders_after = await db.get_open_orders(market.id)
+    assert len(open_orders_after) == 0
+
+
 # ============ Full Trade Lifecycle Test ============
 
 @pytest.mark.asyncio

@@ -173,3 +173,27 @@ When removing a feature, update all these places:
 
 ### Test count dropped from 69 to 66
 Removed 3 tests for `calculate_binary_result()`. All remaining 66 tests pass.
+
+---
+
+## Combining Close and Settle (TODO-024) - 2026-02-04
+
+### Simplifying the admin workflow
+The old flow required two steps: Close Market → Settle Market. This was unnecessary complexity since:
+1. The `settle_market()` function already cancels all open orders before settling
+2. Admins don't need a "CLOSED" intermediate state - they just want to end the market with a settlement value
+
+### Implementation approach
+Rather than creating a new combined endpoint, the existing infrastructure already supported this:
+- `settlement.settle_market()` calls `db.cancel_all_market_orders()` before settling
+- The settle POST endpoint only rejected SETTLED markets (not OPEN ones)
+- Only the UI prevented settling OPEN markets
+
+**Changes made:**
+1. **admin.html**: Replaced "Close" button with "Settle" link for OPEN markets
+2. **settle.html**: Added note explaining that settling auto-closes the market
+3. **main.py**: Updated settle GET endpoint to redirect SETTLED markets to results, allowing OPEN/CLOSED
+4. **Kept `/admin/markets/{id}/close` endpoint** for backward compatibility (existing tests use it)
+
+### Test count increased to 67
+Added `test_settle_open_market_cancels_orders` to verify OPEN markets can be settled directly and open orders are cancelled.
