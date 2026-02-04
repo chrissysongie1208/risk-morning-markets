@@ -97,3 +97,32 @@ Free tier, no 90-day expiry like Render's database. Connection string in Render 
 
 ### Cold starts
 After 15 min idle, first request takes ~30 seconds. Hit the URL before game starts to warm it up.
+
+---
+
+## Pre-registered Participants (TODO-021) - 2026-02-04
+
+### Design decision: Participants table separate from Users
+The `participants` table holds pre-registered names created by admin. When a user joins by selecting a participant name:
+1. A `User` record is created (if needed) for that display_name
+2. The participant's `claimed_by_user_id` links to that user
+3. Historical data (positions, trades) stays linked to the user record
+
+This allows:
+- Same user to rejoin if they refresh/close browser (participant stays claimed)
+- Admin to release a participant to make it available again
+- Users to retain their trading history across sessions
+
+### Join flow changed: dropdown instead of free-text
+The `/join` endpoint now takes `participant_id` (UUID) instead of `display_name` (text). This prevents:
+- Users creating arbitrary names
+- Name collision issues
+- Typos in display names
+
+### Test updates required
+When changing the join API, ALL tests that use `/join` must be updated. This includes:
+- test_api.py (direct join tests)
+- test_concurrent.py (concurrent user simulations)
+- Any fixture that creates a "participant_client"
+
+Create a helper function `create_participant_and_get_id(name)` to streamline test setup.

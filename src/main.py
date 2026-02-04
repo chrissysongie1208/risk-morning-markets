@@ -58,33 +58,35 @@ async def index(request: Request, session: Optional[str] = Cookie(None), error: 
     if user:
         return RedirectResponse(url="/markets", status_code=status.HTTP_303_SEE_OTHER)
 
+    # Get available (unclaimed) participants for dropdown
+    available_participants = await db.get_available_participants()
+
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "user": None, "error": error}
+        {
+            "request": request,
+            "user": None,
+            "error": error,
+            "participants": available_participants
+        }
     )
 
 
 # ============ Participant Join ============
 
 @app.post("/join")
-async def join(display_name: str = Form(...)):
-    """Join as a participant with a display name."""
-    display_name = display_name.strip()
+async def join(participant_id: str = Form(...)):
+    """Join as a participant by selecting a pre-registered name."""
+    participant_id = participant_id.strip()
 
-    if not display_name:
+    if not participant_id:
         return RedirectResponse(
-            url="/?error=Display name cannot be empty",
-            status_code=status.HTTP_303_SEE_OTHER
-        )
-
-    if len(display_name) > 50:
-        return RedirectResponse(
-            url="/?error=Display name too long (max 50 characters)",
+            url="/?error=Please select a participant name",
             status_code=status.HTTP_303_SEE_OTHER
         )
 
     try:
-        user, token = await auth.login_participant(display_name)
+        user, token = await auth.login_participant(participant_id)
         response = RedirectResponse(url="/markets", status_code=status.HTTP_303_SEE_OTHER)
         return set_session_cookie(response, token)
     except ValueError as e:
@@ -372,6 +374,22 @@ async def admin_panel(
 
     markets = await db.get_all_markets()
     position_limit = await db.get_position_limit()
+    participants = await db.get_all_participants()
+
+    # Get user names for claimed participants
+    participants_with_users = []
+    for p in participants:
+        claimed_by_name = None
+        if p.claimed_by_user_id:
+            claimed_user = await db.get_user_by_id(p.claimed_by_user_id)
+            claimed_by_name = claimed_user.display_name if claimed_user else "Unknown"
+        participants_with_users.append({
+            "id": p.id,
+            "display_name": p.display_name,
+            "created_at": p.created_at,
+            "claimed_by_user_id": p.claimed_by_user_id,
+            "claimed_by_name": claimed_by_name
+        })
 
     return templates.TemplateResponse(
         "admin.html",
@@ -380,6 +398,7 @@ async def admin_panel(
             "user": user,
             "markets": markets,
             "position_limit": position_limit,
+            "participants": participants_with_users,
             "error": error,
             "success": success
         }
@@ -465,6 +484,105 @@ async def update_config(
 
     return RedirectResponse(
         url="/admin?" + urlencode({"success": f"Position limit updated to {position_limit}"}),
+        status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+# ============ Participant Management Routes ============
+
+@app.post("/admin/participants")
+async def create_participant(
+    display_name: str = Form(...),
+    session: Optional[str] = Cookie(None)
+):
+    """Create a new pre-registered participant (admin only)."""
+    user = await auth.get_current_user(session)
+    if not user:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    display_name = display_name.strip()
+
+    if not display_name:
+        return RedirectResponse(
+            url="/admin?" + urlencode({"error": "Participant name cannot be empty"}),
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    if len(display_name) > 50:
+        return RedirectResponse(
+            url="/admin?" + urlencode({"error": "Participant name too long (max 50 characters)"}),
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    try:
+        await db.create_participant(display_name)
+        return RedirectResponse(
+            url="/admin?" + urlencode({"success": f"Participant '{display_name}' created"}),
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+    except ValueError as e:
+        return RedirectResponse(
+            url="/admin?" + urlencode({"error": str(e)}),
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+
+
+@app.post("/admin/participants/{participant_id}/delete")
+async def delete_participant(
+    participant_id: str,
+    session: Optional[str] = Cookie(None)
+):
+    """Delete a pre-registered participant (admin only). Cannot delete claimed participants."""
+    user = await auth.get_current_user(session)
+    if not user:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    participant = await db.get_participant_by_id(participant_id)
+    if not participant:
+        return RedirectResponse(
+            url="/admin?" + urlencode({"error": "Participant not found"}),
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    if participant.claimed_by_user_id:
+        return RedirectResponse(
+            url="/admin?" + urlencode({"error": "Cannot delete claimed participant"}),
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    await db.delete_participant(participant_id)
+    return RedirectResponse(
+        url="/admin?" + urlencode({"success": f"Participant '{participant.display_name}' deleted"}),
+        status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+@app.post("/admin/participants/{participant_id}/release")
+async def release_participant(
+    participant_id: str,
+    session: Optional[str] = Cookie(None)
+):
+    """Release a claimed participant back to available (admin only)."""
+    user = await auth.get_current_user(session)
+    if not user:
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    participant = await db.get_participant_by_id(participant_id)
+    if not participant:
+        return RedirectResponse(
+            url="/admin?" + urlencode({"error": "Participant not found"}),
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    await db.unclaim_participant(participant_id)
+    return RedirectResponse(
+        url="/admin?" + urlencode({"success": f"Participant '{participant.display_name}' released"}),
         status_code=status.HTTP_303_SEE_OTHER
     )
 

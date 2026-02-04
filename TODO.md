@@ -40,7 +40,7 @@
 
 - [x] TODO-020: Anti-spoofing - Prevent users from placing bids when they have an offer at equal or higher price (and vice versa). When placing a BID at price P, reject if user has any OFFER at price <= P. When placing an OFFER at price P, reject if user has any BID at price >= P. Add validation in `matching.py` before order creation. Add test cases. Display clear error message to user.
 
-- [ ] TODO-021: Pre-registered usernames - Admin can create participant usernames in advance. Add `participants` table (id, display_name, created_by_admin, created_at). Admin panel gets new section to add/remove participant names. Join page changes from free-text input to dropdown of available names. When user selects a name, they "claim" it for that session (still no password). Historical data (positions, trades) stays linked to the participant record across sessions.
+- [x] TODO-021: Pre-registered usernames - Admin can create participant usernames in advance. Add `participants` table (id, display_name, created_by_admin, created_at). Admin panel gets new section to add/remove participant names. Join page changes from free-text input to dropdown of available names. When user selects a name, they "claim" it for that session (still no password). Historical data (positions, trades) stays linked to the participant record across sessions.
 
 - [ ] TODO-022: Add tests for anti-spoofing and pre-registered usernames - Unit tests for spoofing prevention logic, integration tests for admin creating participants, tests for dropdown join flow.
 

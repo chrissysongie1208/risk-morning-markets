@@ -17,16 +17,23 @@
         <!-- Participant Join -->
         <section>
             <h2>Join as Participant</h2>
-            <p>Enter a display name to join the game. No password needed!</p>
+            {% if participants %}
+            <p>Select your name from the list below. No password needed!</p>
             <form method="POST" action="/join">
-                <label for="display_name">
-                    Display Name
-                    <input type="text" id="display_name" name="display_name"
-                           placeholder="Your name" required maxlength="50"
-                           autofocus>
+                <label for="participant_id">
+                    Your Name
+                    <select id="participant_id" name="participant_id" required autofocus>
+                        <option value="">-- Select your name --</option>
+                        {% for p in participants %}
+                        <option value="{{ p.id }}">{{ p.display_name }}</option>
+                        {% endfor %}
+                    </select>
                 </label>
                 <button type="submit">Join Game</button>
             </form>
+            {% else %}
+            <p>No participant names available. Please ask the admin to add your name.</p>
+            {% endif %}
         </section>
 
         <!-- Admin Login -->

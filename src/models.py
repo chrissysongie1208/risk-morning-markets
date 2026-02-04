@@ -37,6 +37,15 @@ class User(BaseModel):
     created_at: datetime
 
 
+class Participant(BaseModel):
+    """Pre-registered participant name created by admin."""
+    id: str
+    display_name: str
+    created_by_admin: bool = True
+    created_at: datetime
+    claimed_by_user_id: Optional[str] = None  # User ID who claimed this name
+
+
 class Market(BaseModel):
     id: str
     question: str

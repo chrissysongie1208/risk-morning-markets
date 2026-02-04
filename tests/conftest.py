@@ -50,6 +50,7 @@ async def setup_test_db():
     await db.database.execute("TRUNCATE TABLE orders CASCADE")
     await db.database.execute("TRUNCATE TABLE positions CASCADE")
     await db.database.execute("TRUNCATE TABLE markets CASCADE")
+    await db.database.execute("TRUNCATE TABLE participants CASCADE")
     await db.database.execute("TRUNCATE TABLE users CASCADE")
     # Re-initialize config with default position limit
     await db.database.execute("DELETE FROM config")
@@ -124,3 +125,12 @@ async def set_user_position(market_id: str, user_id: str, net_quantity: int, tot
         cost_delta=total_cost - position.total_cost
     )
     return await db.get_position(market_id, user_id)
+
+
+async def create_participant_and_get_id(display_name: str) -> str:
+    """Helper to create a participant and return their ID for joining.
+
+    This creates a pre-registered participant name that can be used in the /join flow.
+    """
+    participant = await db.create_participant(display_name)
+    return participant.id

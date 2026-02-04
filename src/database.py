@@ -12,7 +12,7 @@ from typing import Optional
 from databases import Database
 
 from models import (
-    User, Market, Order, Trade, Position,
+    User, Market, Order, Trade, Position, Participant,
     MarketStatus, OrderSide, OrderStatus
 )
 
@@ -64,6 +64,17 @@ async def init_db() -> None:
         CREATE TABLE IF NOT EXISTS config (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
+        )
+    """)
+
+    # Participants table (pre-registered names by admin)
+    await database.execute("""
+        CREATE TABLE IF NOT EXISTS participants (
+            id TEXT PRIMARY KEY,
+            display_name TEXT UNIQUE NOT NULL,
+            created_by_admin INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            claimed_by_user_id TEXT REFERENCES users(id)
         )
     """)
 
@@ -630,6 +641,136 @@ async def set_position_limit(limit: int) -> None:
         INSERT INTO config (key, value) VALUES ('position_limit', :value)
         ON CONFLICT (key) DO UPDATE SET value = :value
     """, {"value": str(limit)})
+
+
+# ============ Participant Operations ============
+
+async def create_participant(display_name: str) -> Participant:
+    """Create a pre-registered participant name (admin only).
+
+    Raises ValueError if display_name already exists.
+    """
+    participant_id = generate_id()
+    now = datetime.utcnow().isoformat()
+
+    try:
+        await database.execute("""
+            INSERT INTO participants (id, display_name, created_by_admin, created_at)
+            VALUES (:id, :display_name, 1, :created_at)
+        """, {
+            "id": participant_id,
+            "display_name": display_name,
+            "created_at": now
+        })
+    except Exception as e:
+        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+            raise ValueError(f"Participant name '{display_name}' already exists")
+        raise
+
+    return Participant(
+        id=participant_id,
+        display_name=display_name,
+        created_by_admin=True,
+        created_at=datetime.fromisoformat(now),
+        claimed_by_user_id=None
+    )
+
+
+async def get_participant_by_id(participant_id: str) -> Optional[Participant]:
+    """Get a participant by ID."""
+    row = await database.fetch_one(
+        "SELECT * FROM participants WHERE id = :id", {"id": participant_id}
+    )
+    if row:
+        return Participant(
+            id=row["id"],
+            display_name=row["display_name"],
+            created_by_admin=bool(row["created_by_admin"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            claimed_by_user_id=row["claimed_by_user_id"]
+        )
+    return None
+
+
+async def get_participant_by_name(display_name: str) -> Optional[Participant]:
+    """Get a participant by display name."""
+    row = await database.fetch_one(
+        "SELECT * FROM participants WHERE display_name = :name", {"name": display_name}
+    )
+    if row:
+        return Participant(
+            id=row["id"],
+            display_name=row["display_name"],
+            created_by_admin=bool(row["created_by_admin"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            claimed_by_user_id=row["claimed_by_user_id"]
+        )
+    return None
+
+
+async def get_available_participants() -> list[Participant]:
+    """Get all participants that haven't been claimed yet."""
+    rows = await database.fetch_all("""
+        SELECT * FROM participants
+        WHERE claimed_by_user_id IS NULL
+        ORDER BY display_name ASC
+    """)
+    return [
+        Participant(
+            id=row["id"],
+            display_name=row["display_name"],
+            created_by_admin=bool(row["created_by_admin"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            claimed_by_user_id=row["claimed_by_user_id"]
+        )
+        for row in rows
+    ]
+
+
+async def get_all_participants() -> list[Participant]:
+    """Get all participants (for admin panel)."""
+    rows = await database.fetch_all("""
+        SELECT * FROM participants
+        ORDER BY display_name ASC
+    """)
+    return [
+        Participant(
+            id=row["id"],
+            display_name=row["display_name"],
+            created_by_admin=bool(row["created_by_admin"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            claimed_by_user_id=row["claimed_by_user_id"]
+        )
+        for row in rows
+    ]
+
+
+async def claim_participant(participant_id: str, user_id: str) -> None:
+    """Claim a participant name for a user."""
+    await database.execute("""
+        UPDATE participants
+        SET claimed_by_user_id = :user_id
+        WHERE id = :participant_id AND claimed_by_user_id IS NULL
+    """, {"user_id": user_id, "participant_id": participant_id})
+
+
+async def unclaim_participant(participant_id: str) -> None:
+    """Unclaim a participant name (release it back to available)."""
+    await database.execute("""
+        UPDATE participants
+        SET claimed_by_user_id = NULL
+        WHERE id = :participant_id
+    """, {"participant_id": participant_id})
+
+
+async def delete_participant(participant_id: str) -> bool:
+    """Delete a participant. Returns True if deleted, False if not found or claimed."""
+    # Only delete if not claimed
+    result = await database.execute("""
+        DELETE FROM participants
+        WHERE id = :id AND claimed_by_user_id IS NULL
+    """, {"id": participant_id})
+    return result > 0 if result else False
 
 
 # Synchronous init for testing/CLI

@@ -82,18 +82,42 @@ def verify_admin_credentials(username: str, password: str) -> bool:
     return username == ADMIN_USERNAME and password == ADMIN_PASSWORD
 
 
-async def login_participant(display_name: str) -> tuple[User, str]:
-    """Create a participant user and return (user, session_token).
+async def login_participant(participant_id: str) -> tuple[User, str]:
+    """Claim a pre-registered participant and return (user, session_token).
 
-    Raises ValueError if display_name already exists.
+    The participant must exist and not be claimed by another user.
+    Creates a new user record linked to the participant.
+
+    Raises ValueError if participant doesn't exist or is already claimed.
     """
-    # Check if this name is already taken
-    existing = await db.get_user_by_name(display_name)
-    if existing:
-        raise ValueError(f"Display name '{display_name}' is already taken")
+    # Get the participant
+    participant = await db.get_participant_by_id(participant_id)
+    if not participant:
+        raise ValueError("Participant not found")
 
-    # Create new user
-    user = await db.create_user(display_name, is_admin=False)
+    if participant.claimed_by_user_id:
+        # If already claimed, check if user exists and return session for them
+        existing_user = await db.get_user_by_id(participant.claimed_by_user_id)
+        if existing_user:
+            token = create_session(existing_user.id)
+            return existing_user, token
+        # User was deleted but participant still claimed - should not happen
+        raise ValueError("Participant session is invalid")
+
+    # Check if a user with this display name already exists
+    existing_user = await db.get_user_by_name(participant.display_name)
+    if existing_user:
+        # User exists - link participant to them and create session
+        await db.claim_participant(participant_id, existing_user.id)
+        token = create_session(existing_user.id)
+        return existing_user, token
+
+    # Create new user with participant's display name
+    user = await db.create_user(participant.display_name, is_admin=False)
+
+    # Link participant to user
+    await db.claim_participant(participant_id, user.id)
+
     token = create_session(user.id)
     return user, token
 

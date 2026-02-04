@@ -93,6 +93,72 @@
     {% endif %}
 </article>
 
+<!-- Participant Management -->
+<article>
+    <header>
+        <h2>Manage Participants</h2>
+    </header>
+    <p>Pre-register participant names. Users will select from this list when joining.</p>
+
+    <!-- Add Participant Form -->
+    <form method="POST" action="/admin/participants" style="margin-bottom: 1rem;">
+        <div style="display: flex; gap: 0.5rem; align-items: flex-end;">
+            <label for="display_name" style="flex: 1; margin-bottom: 0;">
+                New Participant Name
+                <input type="text" id="display_name" name="display_name"
+                       placeholder="e.g., John" required maxlength="50">
+            </label>
+            <button type="submit" style="margin-bottom: 0;">Add</button>
+        </div>
+    </form>
+
+    <!-- Participant List -->
+    {% if participants %}
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in participants %}
+            <tr>
+                <td><strong>{{ p.display_name }}</strong></td>
+                <td>
+                    {% if p.claimed_by_user_id %}
+                        <span style="color: var(--ins-color);">Claimed</span>
+                    {% else %}
+                        <span style="color: var(--muted-color);">Available</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if p.claimed_by_user_id %}
+                        <form method="POST" action="/admin/participants/{{ p.id }}/release" style="display:inline;">
+                            <button type="submit" class="secondary outline"
+                                    onclick="return confirm('Release this participant? They can rejoin later.')">
+                                Release
+                            </button>
+                        </form>
+                    {% else %}
+                        <form method="POST" action="/admin/participants/{{ p.id }}/delete" style="display:inline;">
+                            <button type="submit" class="secondary outline"
+                                    onclick="return confirm('Delete this participant name?')">
+                                Delete
+                            </button>
+                        </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+        <p>No participants registered yet. Add names above.</p>
+    {% endif %}
+</article>
+
 <!-- Position Limit Config -->
 <article>
     <header>

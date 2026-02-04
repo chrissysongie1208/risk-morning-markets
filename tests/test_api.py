@@ -21,6 +21,7 @@ from httpx import AsyncClient, ASGITransport
 from main import app
 import database as db
 import auth
+from conftest import create_participant_and_get_id
 
 
 @pytest_asyncio.fixture
@@ -51,10 +52,11 @@ async def participant_client():
     """Create an async HTTP client logged in as a participant."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        # Join as participant
+        # Create a pre-registered participant and join
+        participant_id = await create_participant_and_get_id("TestParticipant")
         response = await ac.post(
             "/join",
-            data={"display_name": "TestParticipant"},
+            data={"participant_id": participant_id},
             follow_redirects=False
         )
         yield ac
@@ -64,10 +66,13 @@ async def participant_client():
 
 @pytest.mark.asyncio
 async def test_join_unique_name(client):
-    """POST /join with unique name -> success, get session"""
+    """POST /join with pre-registered participant -> success, get session"""
+    # Create a pre-registered participant
+    participant_id = await create_participant_and_get_id("UniqueUser1")
+
     response = await client.post(
         "/join",
-        data={"display_name": "UniqueUser1"},
+        data={"participant_id": participant_id},
         follow_redirects=False
     )
 
@@ -80,30 +85,32 @@ async def test_join_unique_name(client):
 
 
 @pytest.mark.asyncio
-async def test_join_duplicate_name_rejected(client):
-    """POST /join with existing name -> redirect with error"""
+async def test_join_already_claimed_allows_rejoin(client):
+    """POST /join with already claimed participant -> allows rejoin (same user)"""
+    # Create a pre-registered participant
+    participant_id = await create_participant_and_get_id("ClaimedUser")
+
     # First user joins successfully
     response1 = await client.post(
         "/join",
-        data={"display_name": "DuplicateUser"},
+        data={"participant_id": participant_id},
         follow_redirects=False
     )
     assert response1.status_code == 303
     assert response1.headers["location"] == "/markets"
 
-    # Second user with same name - need new client to avoid cookie
+    # Same participant joins again - should work (returns same user session)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client2:
         response2 = await client2.post(
             "/join",
-            data={"display_name": "DuplicateUser"},
+            data={"participant_id": participant_id},
             follow_redirects=False
         )
 
-        # Should redirect back to / with error
+        # Should still redirect to /markets (same user rejoins)
         assert response2.status_code == 303
-        assert "error=" in response2.headers["location"]
-        assert "already taken" in response2.headers["location"].lower() or "error=" in response2.headers["location"]
+        assert response2.headers["location"] == "/markets"
 
 
 # ============ Admin Auth Tests ============
@@ -317,10 +324,11 @@ async def test_cancel_other_user_order_rejected():
 
     # Now create a different user to try to cancel
     async with AsyncClient(transport=transport, base_url="http://test") as other_cl:
-        # Join as different participant
+        # Create and join as different participant
+        other_participant_id = await create_participant_and_get_id("OtherCancelUser")
         await other_cl.post(
             "/join",
-            data={"display_name": "OtherCancelUser"},
+            data={"participant_id": other_participant_id},
             follow_redirects=False
         )
 
@@ -403,10 +411,11 @@ async def test_full_trade_lifecycle():
         assert market is not None
 
     # Step 2: User A places offer at 100 for 5
+    user_a_participant_id = await create_participant_and_get_id("LifecycleUserA")
     async with AsyncClient(transport=transport, base_url="http://test") as user_a_cl:
         await user_a_cl.post(
             "/join",
-            data={"display_name": "LifecycleUserA"},
+            data={"participant_id": user_a_participant_id},
             follow_redirects=False
         )
 
@@ -421,10 +430,11 @@ async def test_full_trade_lifecycle():
         assert user_a is not None
 
     # Step 3: User B places bid at 100 for 5 (should match)
+    user_b_participant_id = await create_participant_and_get_id("LifecycleUserB")
     async with AsyncClient(transport=transport, base_url="http://test") as user_b_cl:
         await user_b_cl.post(
             "/join",
-            data={"display_name": "LifecycleUserB"},
+            data={"participant_id": user_b_participant_id},
             follow_redirects=False
         )
 

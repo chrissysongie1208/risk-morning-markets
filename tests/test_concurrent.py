@@ -23,6 +23,7 @@ from main import app
 import database as db
 import settlement
 from models import OrderSide
+from conftest import create_participant_and_get_id
 
 
 @pytest_asyncio.fixture
@@ -39,24 +40,29 @@ async def market():
 @pytest.mark.asyncio
 async def test_multiple_users_join_simultaneously():
     """
-    Given: Empty system
+    Given: 10 pre-registered participants
     When: 10 users join at the same time (async/parallel requests)
     Then: All 10 users successfully created with unique IDs
     """
     transport = ASGITransport(app=app)
+
+    # Pre-create 10 participants
+    user_names = [f"ConcurrentUser{i}" for i in range(10)]
+    participant_ids = {}
+    for name in user_names:
+        participant_ids[name] = await create_participant_and_get_id(name)
 
     async def join_user(name: str):
         """Helper to join a user and return result."""
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post(
                 "/join",
-                data={"display_name": name},
+                data={"participant_id": participant_ids[name]},
                 follow_redirects=False
             )
             return name, response.status_code, response.headers.get("location", "")
 
     # Launch 10 users joining at once
-    user_names = [f"ConcurrentUser{i}" for i in range(10)]
     tasks = [join_user(name) for name in user_names]
     results = await asyncio.gather(*tasks)
 
@@ -96,36 +102,19 @@ async def test_multiple_users_place_orders_simultaneously(market):
         user = await db.create_user(f"OrderPlacer{i}")
         users.append(user)
 
-    async def place_order_for_user(user_id: str, price: float, user_index: int):
-        """Helper to place an order for a user."""
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            # First join to get session (we'll use the existing user)
-            user = await db.get_user_by_id(user_id)
+    # Pre-create participants for simultaneous orders test
+    participant_ids = {}
+    for i in range(5):
+        name = f"SimultaneousOrderer{i}"
+        participant_ids[i] = await create_participant_and_get_id(name)
 
-            # Join with the same name to get session
-            response = await client.post(
-                "/join",
-                data={"display_name": f"OrderPlacer{user_index}_session"},
-                follow_redirects=False
-            )
-
-            # Place order - each user places a BID at different prices
-            response = await client.post(
-                f"/markets/{market.id}/orders",
-                data={"side": "BID", "price": str(price), "quantity": "3"},
-                follow_redirects=False
-            )
-            return user_id, response.status_code
-
-    # Create 5 more users with sessions and place orders concurrently
     async def create_and_place_order(i: int):
         """Create a user and place an order."""
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            # Join as new user
-            name = f"SimultaneousOrderer{i}"
+            # Join as pre-registered participant
             response = await client.post(
                 "/join",
-                data={"display_name": name},
+                data={"participant_id": participant_ids[i]},
                 follow_redirects=False
             )
 
@@ -179,8 +168,6 @@ async def test_concurrent_matching(market):
 
     # Create the seller and place the offer
     seller = await db.create_user("ConcurrentSeller")
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        await client.post("/join", data={"display_name": "ConcurrentSellerSession"}, follow_redirects=False)
 
     # Place the initial offer directly through the database/matching engine
     import matching
@@ -193,14 +180,18 @@ async def test_concurrent_matching(market):
     )
     assert result.order is not None, "Offer should be resting"
 
+    # Pre-create participants for concurrent buyers
+    buyer_participant_ids = {}
+    for i in range(3):
+        buyer_participant_ids[i] = await create_participant_and_get_id(f"ConcurrentBuyer{i}")
+
     async def create_buyer_and_bid(i: int):
         """Create a buyer and place a bid."""
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            # Join as new user
-            name = f"ConcurrentBuyer{i}"
+            # Join as pre-registered participant
             response = await client.post(
                 "/join",
-                data={"display_name": name},
+                data={"participant_id": buyer_participant_ids[i]},
                 follow_redirects=False
             )
 
@@ -279,11 +270,15 @@ async def test_concurrent_order_and_cancel(market):
     # Create User B
     user_b = await db.create_user("CancelTestUserB")
 
+    # Pre-create participants for session access
+    participant_a_id = await create_participant_and_get_id("CancelTestUserASession")
+    participant_b_id = await create_participant_and_get_id("CancelTestUserBSession")
+
     async def cancel_order():
         """Cancel User A's order."""
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            # Join as User A
-            await client.post("/join", data={"display_name": "CancelTestUserASession"}, follow_redirects=False)
+            # Join as User A session participant
+            await client.post("/join", data={"participant_id": participant_a_id}, follow_redirects=False)
 
             # Cancel the order
             response = await client.post(
@@ -295,8 +290,8 @@ async def test_concurrent_order_and_cancel(market):
     async def place_crossing_bid():
         """Place a crossing bid as User B."""
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            # Join as User B
-            await client.post("/join", data={"display_name": "CancelTestUserBSession"}, follow_redirects=False)
+            # Join as User B session participant
+            await client.post("/join", data={"participant_id": participant_b_id}, follow_redirects=False)
 
             # Place crossing bid at 100 for 5 lots
             response = await client.post(
@@ -495,11 +490,14 @@ async def test_rapid_order_placement(market):
     # Set position limit to 20 for this test
     await db.set_position_limit(20)
 
+    # Pre-create participant for rapid order user
+    rapid_participant_id = await create_participant_and_get_id("RapidOrderUser")
+
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # Join as user
         response = await client.post(
             "/join",
-            data={"display_name": "RapidOrderUser"},
+            data={"participant_id": rapid_participant_id},
             follow_redirects=False
         )
         assert response.status_code == 303
@@ -552,8 +550,9 @@ async def test_rapid_order_placement(market):
     assert bid_exposure == 20, f"Bid exposure should be 20, got {bid_exposure}"
 
     # Try to place one more order - should be rejected
+    rapid_user2_participant_id = await create_participant_and_get_id("RapidOrderUser2")
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        await client.post("/join", data={"display_name": "RapidOrderUser2"}, follow_redirects=False)
+        await client.post("/join", data={"participant_id": rapid_user2_participant_id}, follow_redirects=False)
 
         # This user should be able to place an order (new user)
         response = await client.post(
