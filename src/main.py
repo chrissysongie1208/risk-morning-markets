@@ -58,6 +58,10 @@ async def index(request: Request, session: Optional[str] = Cookie(None), error: 
     if user:
         return RedirectResponse(url="/markets", status_code=status.HTTP_303_SEE_OTHER)
 
+    # Cleanup stale participants before showing available list
+    # This auto-releases participants whose users have been inactive
+    await db.cleanup_stale_participants(auth.SESSION_ACTIVITY_TIMEOUT)
+
     # Get available (unclaimed) participants for dropdown
     available_participants = await db.get_available_participants()
 

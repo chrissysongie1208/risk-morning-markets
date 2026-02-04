@@ -407,3 +407,32 @@ Added 5 new tests covering session exclusivity:
 - `test_activity_updates_on_partial_poll` - HTMX poll updates last_activity
 - `test_first_login_sets_activity` - First login sets activity timestamp
 - `test_unclaimed_participant_no_active_check` - Unclaimed participant has no session check
+
+---
+
+## Auto-Unclaim Stale Participants (TODO-031) - 2026-02-04
+
+### Cleanup on index page load
+The `cleanup_stale_participants()` function is called every time someone loads the join page (GET /). This ensures:
+1. Participants whose users are inactive (>30s) are automatically released
+2. The dropdown always shows accurate available participants
+3. Between games, all participants auto-release with no admin intervention needed
+
+### Implementation approach
+The cleanup joins the `participants` table with `users` to check each claimed participant's user `last_activity`. Participants are unclaimed if:
+- User's `last_activity` is NULL (no activity tracked)
+- User's `last_activity` is older than the timeout (default 30s)
+
+### Performance consideration
+The cleanup runs on every index page load, which could be frequent. However:
+- It only queries claimed participants (typically < 30 rows)
+- The join is efficient with indexed tables
+- The update only affects stale rows
+- This avoids needing a separate background task/cron job
+
+### Test count increased from 85 to 89
+Added 4 new tests:
+- `test_stale_participants_auto_unclaim_on_index` - Stale participants released on index load
+- `test_active_participants_not_unclaimed_on_index` - Active participants stay claimed
+- `test_cleanup_stale_participants_returns_count` - Function returns unclaim count
+- `test_cleanup_stale_participants_with_no_activity` - NULL activity treated as stale

@@ -1366,3 +1366,171 @@ async def test_unclaimed_participant_no_active_check():
         # Should succeed - different unclaimed participant
         assert response2.status_code == 303
         assert response2.headers["location"] == "/markets"
+
+
+# ============ Auto-Unclaim Stale Participants Tests (TODO-031) ============
+
+@pytest.mark.asyncio
+async def test_stale_participants_auto_unclaim_on_index():
+    """GET / cleans up stale participants before showing available list."""
+    from datetime import datetime, timedelta
+
+    transport = ASGITransport(app=app)
+
+    # Create a participant
+    participant_id = await create_participant_and_get_id("StaleAutoUnclaim")
+
+    # Have a user claim the participant
+    async with AsyncClient(transport=transport, base_url="http://test") as user1:
+        response = await user1.post(
+            "/join",
+            data={"participant_id": participant_id},
+            follow_redirects=False
+        )
+        assert response.status_code == 303
+
+    # Verify participant is claimed
+    participant = await db.get_participant_by_id(participant_id)
+    assert participant is not None
+    assert participant.claimed_by_user_id is not None
+
+    # Make the user's session stale (> 30 seconds old)
+    stale_time = (datetime.utcnow() - timedelta(seconds=60)).isoformat()
+    await db.database.execute(
+        "UPDATE users SET last_activity = :stale WHERE id = :id",
+        {"stale": stale_time, "id": participant.claimed_by_user_id}
+    )
+
+    # Request the index page (which triggers cleanup)
+    async with AsyncClient(transport=transport, base_url="http://test") as visitor:
+        response = await visitor.get("/")
+        assert response.status_code == 200
+
+    # Participant should now be unclaimed (auto-released due to stale session)
+    participant_after = await db.get_participant_by_id(participant_id)
+    assert participant_after is not None
+    assert participant_after.claimed_by_user_id is None, \
+        "Stale participant should be auto-unclaimed on index page load"
+
+
+@pytest.mark.asyncio
+async def test_active_participants_not_unclaimed_on_index():
+    """GET / does NOT unclaim participants with recent activity."""
+    from datetime import datetime, timedelta
+
+    transport = ASGITransport(app=app)
+
+    # Create a participant
+    participant_id = await create_participant_and_get_id("ActiveNotUnclaim")
+
+    # Have a user claim the participant
+    async with AsyncClient(transport=transport, base_url="http://test") as user1:
+        response = await user1.post(
+            "/join",
+            data={"participant_id": participant_id},
+            follow_redirects=False
+        )
+        assert response.status_code == 303
+
+    # Verify participant is claimed
+    participant = await db.get_participant_by_id(participant_id)
+    assert participant is not None
+    assert participant.claimed_by_user_id is not None
+    user_id = participant.claimed_by_user_id
+
+    # Ensure the user's activity is RECENT (within timeout)
+    recent_time = (datetime.utcnow() - timedelta(seconds=5)).isoformat()
+    await db.database.execute(
+        "UPDATE users SET last_activity = :recent WHERE id = :id",
+        {"recent": recent_time, "id": user_id}
+    )
+
+    # Request the index page (which triggers cleanup)
+    async with AsyncClient(transport=transport, base_url="http://test") as visitor:
+        response = await visitor.get("/")
+        assert response.status_code == 200
+
+    # Participant should STILL be claimed (active session)
+    participant_after = await db.get_participant_by_id(participant_id)
+    assert participant_after is not None
+    assert participant_after.claimed_by_user_id == user_id, \
+        "Active participant should NOT be unclaimed"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_participants_returns_count():
+    """cleanup_stale_participants() returns the number of participants unclaimed."""
+    from datetime import datetime, timedelta
+
+    # Create two participants
+    participant1_id = await create_participant_and_get_id("CleanupCount1")
+    participant2_id = await create_participant_and_get_id("CleanupCount2")
+
+    transport = ASGITransport(app=app)
+
+    # Have users claim both participants
+    async with AsyncClient(transport=transport, base_url="http://test") as user1:
+        await user1.post("/join", data={"participant_id": participant1_id}, follow_redirects=False)
+
+    async with AsyncClient(transport=transport, base_url="http://test") as user2:
+        await user2.post("/join", data={"participant_id": participant2_id}, follow_redirects=False)
+
+    # Make both users stale
+    stale_time = (datetime.utcnow() - timedelta(seconds=60)).isoformat()
+
+    participant1 = await db.get_participant_by_id(participant1_id)
+    participant2 = await db.get_participant_by_id(participant2_id)
+
+    await db.database.execute(
+        "UPDATE users SET last_activity = :stale WHERE id = :id",
+        {"stale": stale_time, "id": participant1.claimed_by_user_id}
+    )
+    await db.database.execute(
+        "UPDATE users SET last_activity = :stale WHERE id = :id",
+        {"stale": stale_time, "id": participant2.claimed_by_user_id}
+    )
+
+    # Call cleanup directly
+    unclaimed_count = await db.cleanup_stale_participants(timeout_seconds=30)
+
+    # Should have unclaimed both
+    assert unclaimed_count == 2
+
+    # Verify both are now unclaimed
+    p1_after = await db.get_participant_by_id(participant1_id)
+    p2_after = await db.get_participant_by_id(participant2_id)
+    assert p1_after.claimed_by_user_id is None
+    assert p2_after.claimed_by_user_id is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_participants_with_no_activity():
+    """cleanup_stale_participants() unclaims participants whose user has NULL last_activity."""
+    transport = ASGITransport(app=app)
+
+    # Create a participant
+    participant_id = await create_participant_and_get_id("NullActivityUser")
+
+    # Have a user claim the participant
+    async with AsyncClient(transport=transport, base_url="http://test") as user1:
+        await user1.post("/join", data={"participant_id": participant_id}, follow_redirects=False)
+
+    # Get the participant and user
+    participant = await db.get_participant_by_id(participant_id)
+    assert participant.claimed_by_user_id is not None
+
+    # Set last_activity to NULL (simulating old data before activity tracking)
+    await db.database.execute(
+        "UPDATE users SET last_activity = NULL WHERE id = :id",
+        {"id": participant.claimed_by_user_id}
+    )
+
+    # Call cleanup
+    unclaimed_count = await db.cleanup_stale_participants(timeout_seconds=30)
+
+    # Should have unclaimed (NULL activity is considered stale)
+    assert unclaimed_count >= 1
+
+    # Verify participant is unclaimed
+    participant_after = await db.get_participant_by_id(participant_id)
+    assert participant_after.claimed_by_user_id is None

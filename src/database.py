@@ -812,6 +812,55 @@ async def delete_participant(participant_id: str) -> bool:
     return result > 0 if result else False
 
 
+async def cleanup_stale_participants(timeout_seconds: int = 30) -> int:
+    """Unclaim participants whose users have been inactive for longer than timeout.
+
+    This makes "claimed" mean "actively in use" rather than "logged in at some point".
+    Between games, all participants auto-release after inactivity - no manual admin
+    cleanup needed.
+
+    Args:
+        timeout_seconds: Number of seconds of inactivity before a participant is released.
+
+    Returns:
+        Number of participants that were unclaimed.
+    """
+    # Find all claimed participants where the user's last_activity is stale
+    # We need to calculate the cutoff time as an ISO timestamp
+    cutoff_time = datetime.utcnow()
+
+    # Get all claimed participants
+    rows = await database.fetch_all("""
+        SELECT p.id as participant_id, u.id as user_id, u.last_activity
+        FROM participants p
+        JOIN users u ON p.claimed_by_user_id = u.id
+        WHERE p.claimed_by_user_id IS NOT NULL
+    """)
+
+    unclaimed_count = 0
+    for row in rows:
+        last_activity = row["last_activity"]
+        if last_activity is None:
+            # No activity recorded - consider stale
+            await database.execute(
+                "UPDATE participants SET claimed_by_user_id = NULL WHERE id = :id",
+                {"id": row["participant_id"]}
+            )
+            unclaimed_count += 1
+        else:
+            # Parse the timestamp and check if stale
+            activity_time = datetime.fromisoformat(last_activity)
+            elapsed = (cutoff_time - activity_time).total_seconds()
+            if elapsed > timeout_seconds:
+                await database.execute(
+                    "UPDATE participants SET claimed_by_user_id = NULL WHERE id = :id",
+                    {"id": row["participant_id"]}
+                )
+                unclaimed_count += 1
+
+    return unclaimed_count
+
+
 # Synchronous init for testing/CLI
 def init_db_sync() -> None:
     """Synchronous wrapper for init_db."""
