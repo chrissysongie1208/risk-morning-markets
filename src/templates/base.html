@@ -178,6 +178,131 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
+
+        /* Price Ladder Orderbook Styles */
+        .price-ladder {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        .price-ladder th {
+            text-align: center;
+            padding: 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--pico-muted-color);
+            border-bottom: 2px solid var(--pico-muted-border-color);
+        }
+        .price-ladder td {
+            padding: 0.4rem 0.5rem;
+            vertical-align: middle;
+        }
+        .price-ladder .ladder-price {
+            text-align: center;
+            font-weight: bold;
+            font-size: 1rem;
+            min-width: 80px;
+            background: var(--pico-card-background-color);
+        }
+        .price-ladder .ladder-bid-info,
+        .price-ladder .ladder-offer-info {
+            min-width: 120px;
+        }
+        .price-ladder .ladder-bid-info {
+            text-align: right;
+            padding-right: 1rem;
+        }
+        .price-ladder .ladder-offer-info {
+            text-align: left;
+            padding-left: 1rem;
+        }
+        .price-ladder .ladder-action {
+            width: 70px;
+            text-align: center;
+        }
+        .price-ladder .ladder-qty {
+            font-weight: bold;
+            margin: 0 0.5rem;
+        }
+        .price-ladder .ladder-user {
+            color: var(--pico-muted-color);
+            font-size: 0.85rem;
+        }
+
+        /* Offer rows - highlight area on right */
+        .price-ladder .ladder-offer-row .ladder-offer-info {
+            background: rgba(239, 68, 68, 0.08);
+        }
+        .price-ladder .ladder-offer-row:hover .ladder-offer-info {
+            background: rgba(239, 68, 68, 0.15);
+        }
+
+        /* Bid rows - highlight area on left */
+        .price-ladder .ladder-bid-row .ladder-bid-info {
+            background: rgba(34, 197, 94, 0.08);
+        }
+        .price-ladder .ladder-bid-row:hover .ladder-bid-info {
+            background: rgba(34, 197, 94, 0.15);
+        }
+
+        /* Own order highlight in ladder */
+        .price-ladder .own-order .ladder-bid-info,
+        .price-ladder .own-order .ladder-offer-info {
+            background: rgba(99, 102, 241, 0.15) !important;
+        }
+        .price-ladder .own-order .ladder-qty {
+            color: #6366f1;
+        }
+
+        /* Spread row */
+        .price-ladder .ladder-spread-row {
+            border-top: 2px dashed var(--pico-muted-border-color);
+            border-bottom: 2px dashed var(--pico-muted-border-color);
+        }
+        .price-ladder .ladder-spread {
+            text-align: center;
+            padding: 0.75rem;
+            background: var(--pico-card-background-color);
+        }
+        .price-ladder .spread-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--pico-muted-color);
+        }
+
+        /* Ladder buttons */
+        .ladder-btn {
+            padding: 0.2rem 0.5rem;
+            font-size: 0.7rem;
+            margin: 0;
+            min-width: 55px;
+        }
+        .ladder-buy-btn {
+            background: #22c55e;
+            border-color: #22c55e;
+            color: white;
+        }
+        .ladder-buy-btn:hover {
+            background: #16a34a;
+            border-color: #16a34a;
+        }
+        .ladder-sell-btn {
+            background: #ef4444;
+            border-color: #ef4444;
+            color: white;
+        }
+        .ladder-sell-btn:hover {
+            background: #dc2626;
+            border-color: #dc2626;
+        }
+
+        /* Empty state */
+        .ladder-empty {
+            text-align: center;
+            padding: 2rem;
+            color: var(--pico-muted-color);
+        }
     </style>
     {% block extra_head %}{% endblock %}
 </head>

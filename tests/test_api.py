@@ -786,11 +786,12 @@ async def test_combined_partial_returns_all_sections(admin_client):
     # Position section
     assert 'id="position-content"' in content
 
-    # Orderbook section with OOB swap
+    # Orderbook section with OOB swap (price ladder layout)
     assert 'id="orderbook"' in content
     assert 'hx-swap-oob="innerHTML"' in content
-    assert "Bids (Buy Orders)" in content
-    assert "Offers (Sell Orders)" in content
+    assert 'class="price-ladder"' in content
+    assert "ladder-bid-info" in content
+    assert "ladder-offer-info" in content
 
     # Trades section with OOB swap
     assert 'id="trades"' in content
@@ -904,8 +905,9 @@ async def test_deprecated_orderbook_partial_still_works(admin_client):
     response = await admin_client.get(f"/partials/orderbook/{market.id}")
 
     assert response.status_code == 200
-    assert "Bids (Buy Orders)" in response.text
-    assert "Offers (Sell Orders)" in response.text
+    # Price ladder layout uses different structure
+    assert 'class="price-ladder"' in response.text
+    assert "ladder-bid-info" in response.text or "ladder-offer-info" in response.text
     assert "102" in response.text  # Our order price
 
 

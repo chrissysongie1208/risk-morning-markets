@@ -813,3 +813,57 @@ Added 6 new tests:
 - `test_aggress_nonexistent_order` - Graceful handling of missing orders
 - `test_aggress_filled_order` - Graceful handling of already-filled orders
 - `test_aggress_partial_fill` - Quantity capped at available amount
+
+---
+
+## Price Ladder Orderbook Layout (TODO-038) - 2026-02-04
+
+### Vertical price ladder vs side-by-side columns
+The traditional side-by-side orderbook (bids on left, offers on right) was replaced with a professional trading ladder layout:
+- **Price column in center**: All prices sorted vertically
+- **Bids on left**: User info and quantity shown on left side of price
+- **Offers on right**: User info and quantity shown on right side of price
+- **Spread row**: Visible gap between best bid and best offer with spread value
+
+This layout matches professional trading UIs (CME, crypto exchanges) where traders can quickly see the entire price depth and spread at a glance.
+
+### Order display logic
+- **Offers**: Displayed at top, sorted by price descending (highest at top). Template uses `offers|reverse` since offers come sorted ASC (best offer first)
+- **Bids**: Displayed below spread, sorted by price descending (best bid at top). Already sorted DESC from database
+- **Result**: Highest prices at top, lowest at bottom, with spread gap in between
+
+### Template changes for layout
+The orderbook section changed from a 2-column CSS grid to a single table with 5 columns:
+1. `ladder-action` (left): Cancel/Sell buttons for bids
+2. `ladder-bid-info`: User and quantity for bids
+3. `ladder-price`: The price level (center)
+4. `ladder-offer-info`: User and quantity for offers
+5. `ladder-action` (right): Cancel/Buy buttons for offers
+
+### CSS styling for visual clarity
+Key styling decisions:
+- **Background highlighting**: Bid rows have green tint on left, offer rows have red tint on right
+- **Spread row**: Dashed borders above and below, with spread value shown
+- **Color-coded buttons**: Buy buttons are green (#22c55e), Sell buttons are red (#ef4444)
+- **Own order highlighting**: Purple tint (consistent with previous own-order styling)
+
+### Test updates for new layout
+When changing a template's structure, tests that assert on specific text content need updating:
+```python
+# Old assertions (side-by-side layout)
+assert "Bids (Buy Orders)" in content
+assert "Offers (Sell Orders)" in content
+
+# New assertions (price ladder layout)
+assert 'class="price-ladder"' in content
+assert "ladder-bid-info" in content
+assert "ladder-offer-info" in content
+```
+
+Check for structural elements rather than display text when verifying layout changes.
+
+### Maintaining both templates
+Both `market_all.html` (combined partial) and `orderbook.html` (deprecated standalone) were updated to use the price ladder layout. Even deprecated templates should stay consistent for backward compatibility.
+
+### No test count change
+This was primarily a UI/template change with test assertion updates. Total tests remain at 95.

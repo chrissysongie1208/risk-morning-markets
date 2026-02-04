@@ -17,101 +17,135 @@
 {% endif %}
 </div>
 
-{# Orderbook section - OOB swap #}
+{# Orderbook section - OOB swap - Price Ladder Layout #}
 <div id="orderbook" hx-swap-oob="innerHTML">
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
-    <!-- Bids -->
-    <div>
-        <h4 class="bid">Bids (Buy Orders)</h4>
-        {% if bids %}
-        <table>
-            <thead>
-                <tr>
-                    <th>User</th>
-                    <th>Price</th>
-                    <th>Qty</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for order in bids %}
-                <tr{% if order.user_id == user.id %} class="own-order"{% endif %}>
-                    <td>{{ order.display_name }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</td>
-                    <td class="bid">{{ "%.2f"|format(order.price) }}</td>
-                    <td>{{ order.remaining_quantity }}</td>
-                    <td>
-                        {% if order.user_id == user.id and market.status.value == 'OPEN' %}
-                        <form hx-post="/orders/{{ order.id }}/cancel" hx-swap="none" style="display:inline;">
-                            <button type="submit" class="outline secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem;">
-                                <span class="btn-spinner spinner" style="width:0.7em;height:0.7em;border-width:1px;margin-right:0.25rem;"></span>
-                                <span class="btn-text">Cancel</span>
-                            </button>
-                        </form>
-                        {% elif order.user_id != user.id and market.status.value == 'OPEN' %}
-                        <form hx-post="/orders/{{ order.id }}/aggress" hx-swap="none" style="display:inline;" class="aggress-form">
-                            <input type="hidden" name="quantity" class="aggress-qty">
-                            <button type="submit" class="outline contrast trade-btn" style="padding:0.25rem 0.5rem; font-size:0.75rem;" title="Sell to this bid">
-                                <span class="btn-spinner spinner" style="width:0.7em;height:0.7em;border-width:1px;margin-right:0.25rem;"></span>
-                                <span class="btn-text">Sell</span>
-                            </button>
-                        </form>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <p><small>No bids</small></p>
-        {% endif %}
-    </div>
+{#
+Price Ladder: vertical layout with price in center
+- Offers (sell orders) at top, sorted by price descending (highest offers first)
+- Spread gap in middle
+- Bids (buy orders) at bottom, sorted by price descending (best bid first)
+- Layout: [Action] Bids | PRICE | Offers [Action]
+#}
 
-    <!-- Offers -->
-    <div>
-        <h4 class="offer">Offers (Sell Orders)</h4>
-        {% if offers %}
-        <table>
-            <thead>
-                <tr>
-                    <th>User</th>
-                    <th>Price</th>
-                    <th>Qty</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for order in offers %}
-                <tr{% if order.user_id == user.id %} class="own-order"{% endif %}>
-                    <td>{{ order.display_name }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</td>
-                    <td class="offer">{{ "%.2f"|format(order.price) }}</td>
-                    <td>{{ order.remaining_quantity }}</td>
-                    <td>
-                        {% if order.user_id == user.id and market.status.value == 'OPEN' %}
-                        <form hx-post="/orders/{{ order.id }}/cancel" hx-swap="none" style="display:inline;">
-                            <button type="submit" class="outline secondary" style="padding:0.25rem 0.5rem; font-size:0.75rem;">
-                                <span class="btn-spinner spinner" style="width:0.7em;height:0.7em;border-width:1px;margin-right:0.25rem;"></span>
-                                <span class="btn-text">Cancel</span>
-                            </button>
-                        </form>
-                        {% elif order.user_id != user.id and market.status.value == 'OPEN' %}
-                        <form hx-post="/orders/{{ order.id }}/aggress" hx-swap="none" style="display:inline;" class="aggress-form">
-                            <input type="hidden" name="quantity" class="aggress-qty">
-                            <button type="submit" class="outline primary trade-btn" style="padding:0.25rem 0.5rem; font-size:0.75rem;" title="Buy this offer">
-                                <span class="btn-spinner spinner" style="width:0.7em;height:0.7em;border-width:1px;margin-right:0.25rem;"></span>
-                                <span class="btn-text">Buy</span>
-                            </button>
-                        </form>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <p><small>No offers</small></p>
-        {% endif %}
-    </div>
-</div>
+{# Build bid lookup by price #}
+{% set bid_by_price = {} %}
+{% for order in bids %}
+    {% if order.price not in bid_by_price %}
+        {% set _ = bid_by_price.update({order.price: []}) %}
+    {% endif %}
+    {% set _ = bid_by_price[order.price].append(order) %}
+{% endfor %}
+
+{# Build offer lookup by price #}
+{% set offer_by_price = {} %}
+{% for order in offers %}
+    {% if order.price not in offer_by_price %}
+        {% set _ = offer_by_price.update({order.price: []}) %}
+    {% endif %}
+    {% set _ = offer_by_price[order.price].append(order) %}
+{% endfor %}
+
+{# Get best bid and best offer for spread display #}
+{% set best_bid = bids[0].price if bids else none %}
+{% set best_offer = offers[0].price if offers else none %}
+
+{% if bids or offers %}
+<table class="price-ladder">
+    <thead>
+        <tr>
+            <th class="ladder-action"></th>
+            <th class="ladder-bid-info">Bids</th>
+            <th class="ladder-price">Price</th>
+            <th class="ladder-offer-info">Offers</th>
+            <th class="ladder-action"></th>
+        </tr>
+    </thead>
+    <tbody>
+        {# Offers section - highest price first (reversed since offers are ASC) #}
+        {% for order in offers|reverse %}
+        <tr class="ladder-offer-row{% if order.user_id == user.id %} own-order{% endif %}">
+            <td class="ladder-action">
+                {# Empty on bid side for offer rows #}
+            </td>
+            <td class="ladder-bid-info">
+                {# Empty bid side #}
+            </td>
+            <td class="ladder-price offer">{{ "%.2f"|format(order.price) }}</td>
+            <td class="ladder-offer-info">
+                <span class="ladder-qty">{{ order.remaining_quantity }}</span>
+                <span class="ladder-user">{{ order.display_name }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</span>
+            </td>
+            <td class="ladder-action">
+                {% if order.user_id == user.id and market.status.value == 'OPEN' %}
+                <form hx-post="/orders/{{ order.id }}/cancel" hx-swap="none" style="display:inline;">
+                    <button type="submit" class="outline secondary ladder-btn" title="Cancel your offer">
+                        <span class="btn-spinner spinner" style="width:0.7em;height:0.7em;border-width:1px;"></span>
+                        <span class="btn-text">Cancel</span>
+                    </button>
+                </form>
+                {% elif order.user_id != user.id and market.status.value == 'OPEN' %}
+                <form hx-post="/orders/{{ order.id }}/aggress" hx-swap="none" style="display:inline;" class="aggress-form">
+                    <input type="hidden" name="quantity" class="aggress-qty">
+                    <button type="submit" class="ladder-btn ladder-buy-btn" title="Buy this offer">
+                        <span class="btn-spinner spinner" style="width:0.7em;height:0.7em;border-width:1px;"></span>
+                        <span class="btn-text">Buy</span>
+                    </button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+
+        {# Spread row #}
+        <tr class="ladder-spread-row">
+            <td colspan="5" class="ladder-spread">
+                {% if best_bid and best_offer %}
+                    <span class="spread-label">Spread: {{ "%.2f"|format(best_offer - best_bid) }}</span>
+                {% else %}
+                    <span class="spread-label">---</span>
+                {% endif %}
+            </td>
+        </tr>
+
+        {# Bids section - highest price first (already DESC) #}
+        {% for order in bids %}
+        <tr class="ladder-bid-row{% if order.user_id == user.id %} own-order{% endif %}">
+            <td class="ladder-action">
+                {% if order.user_id == user.id and market.status.value == 'OPEN' %}
+                <form hx-post="/orders/{{ order.id }}/cancel" hx-swap="none" style="display:inline;">
+                    <button type="submit" class="outline secondary ladder-btn" title="Cancel your bid">
+                        <span class="btn-spinner spinner" style="width:0.7em;height:0.7em;border-width:1px;"></span>
+                        <span class="btn-text">Cancel</span>
+                    </button>
+                </form>
+                {% elif order.user_id != user.id and market.status.value == 'OPEN' %}
+                <form hx-post="/orders/{{ order.id }}/aggress" hx-swap="none" style="display:inline;" class="aggress-form">
+                    <input type="hidden" name="quantity" class="aggress-qty">
+                    <button type="submit" class="ladder-btn ladder-sell-btn" title="Sell to this bid">
+                        <span class="btn-spinner spinner" style="width:0.7em;height:0.7em;border-width:1px;"></span>
+                        <span class="btn-text">Sell</span>
+                    </button>
+                </form>
+                {% endif %}
+            </td>
+            <td class="ladder-bid-info">
+                <span class="ladder-user">{{ order.display_name }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</span>
+                <span class="ladder-qty">{{ order.remaining_quantity }}</span>
+            </td>
+            <td class="ladder-price bid">{{ "%.2f"|format(order.price) }}</td>
+            <td class="ladder-offer-info">
+                {# Empty offer side #}
+            </td>
+            <td class="ladder-action">
+                {# Empty on offer side for bid rows #}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="ladder-empty"><small>No orders in the book</small></p>
+{% endif %}
 </div>
 
 {# Trades section - OOB swap #}
