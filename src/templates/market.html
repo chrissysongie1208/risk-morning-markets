@@ -50,6 +50,27 @@
         </form>
         <small>Position limit: {{ position_limit }} lots. Your current position: {{ position.net_quantity if position else 0 }} lots.</small>
     </section>
+
+    {% if user.is_admin %}
+    <!-- Admin: Settle Market Form -->
+    <section style="border: 2px solid var(--pico-primary); padding: 1rem; border-radius: 0.5rem; margin-top: 1rem;">
+        <h3>Admin: Settle Market</h3>
+        <form method="POST" action="/admin/markets/{{ market.id }}/settle">
+            <div style="display: grid; grid-template-columns: 2fr auto; gap: 1rem; align-items: end;">
+                <label>
+                    Settlement Value (actual answer)
+                    <input type="number" name="settlement_value" step="any" required placeholder="e.g., 1002">
+                </label>
+                <button type="submit"
+                        onclick="return confirm('Settle this market? This will close the market, cancel all open orders, and calculate final P&L. This cannot be undone.')">
+                    Settle Market
+                </button>
+            </div>
+        </form>
+        <small>Settling will close the market and calculate P&L for all participants.</small>
+    </section>
+    {% endif %}
+
     {% elif market.status.value == 'CLOSED' %}
     <p><em>This market is closed. Waiting for settlement.</em></p>
     {% else %}

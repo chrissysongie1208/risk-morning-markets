@@ -253,3 +253,20 @@ The primary target div needs a wrapper to work correctly:
 
 ### Backward compatibility
 Old endpoints (`/partials/orderbook`, `/partials/position`, `/partials/trades`) are kept but marked deprecated. This allows gradual migration if any external tools depend on them.
+
+---
+
+## Admin Settle on Market Page (TODO-026) - 2026-02-04
+
+### Convenience over navigation
+Instead of forcing admins to go to Admin Panel → Settle to end a market, the settle form is now available directly on the market page. This reduces clicks and lets admins settle while viewing the live orderbook/positions.
+
+### Implementation approach
+The simplest solution was adding a conditional section in `market.html`:
+- Check `{% if user.is_admin %}` to show the form only to admins
+- Reuse the existing `/admin/markets/{market_id}/settle` POST endpoint
+- Form includes confirmation dialog to prevent accidental settlements
+- Styled with a border to visually distinguish it from trading controls
+
+### Template-only change
+No backend changes needed - the settle POST endpoint already handles OPEN markets (since TODO-024). This is a pure frontend UX improvement, which keeps the change minimal and low-risk.

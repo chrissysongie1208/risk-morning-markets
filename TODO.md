@@ -54,7 +54,7 @@
 
 - [x] TODO-025: Combine HTMX partials into single endpoint - Create `/partials/market/{id}` that returns position, orderbook, and trades in one response. Update market.html to poll this single endpoint instead of 3 separate endpoints. Use HTMX `hx-swap-oob` or wrap sections in target divs. This reduces HTTP requests from 3/sec to 1/sec per user, reducing load on Render/Neon free tiers. Keep old endpoints for backward compatibility but mark deprecated.
 
-- [ ] TODO-026: Add settle button to market page for admin - When admin views a market page and market is OPEN, show a "Settle Market" form directly on the page (not just in Admin panel). Form has settlement value input and submit button. Non-admin users don't see this form. This lets admin settle without navigating away from the market view.
+- [x] TODO-026: Add settle button to market page for admin - When admin views a market page and market is OPEN, show a "Settle Market" form directly on the page (not just in Admin panel). Form has settlement value input and submit button. Non-admin users don't see this form. This lets admin settle without navigating away from the market view.
 
 - [ ] TODO-027: Auto-redirect to results when market settles - When market is SETTLED and user is on the market page, automatically redirect to results page. Implement via: (a) HTMX partial returns a redirect header/meta refresh when market.status == SETTLED, or (b) Add market status to partial response and use HTMX `hx-trigger` with custom event, or (c) Simple JS check on partial response. Choose simplest approach that works.
 
