@@ -364,3 +364,46 @@ Added 6 new tests covering admin settle form visibility and auto-redirect:
 - `test_settle_from_market_page_works` - Settle POST from market page succeeds
 - `test_auto_redirect_on_settled_market` - HX-Redirect header on settled market
 - `test_no_redirect_on_open_market` - No redirect header for open markets
+
+---
+
+## Session Exclusivity / Duplicate Login Prevention (TODO-030) - 2026-02-04
+
+### Activity tracking approach
+Session exclusivity is implemented by tracking `last_activity` timestamp on the users table:
+1. **On login**: Set `last_activity` to current time
+2. **On HTMX poll**: Update `last_activity` each time user polls the combined partial endpoint
+3. **On login attempt**: Check if participant is claimed AND user is active (last_activity < 30s ago)
+
+The 30-second timeout is configurable via `SESSION_ACTIVITY_TIMEOUT` in `auth.py`.
+
+### Why track activity vs. using sessions
+The in-memory session store (`_sessions` dict in auth.py) only tracks session tokens, not activity. Adding `last_activity` to the database:
+- Persists across server restarts
+- Works with multiple server instances (if scaling up later)
+- Doesn't require managing session invalidation logic
+- Is simpler than tracking "active sessions" separately
+
+### Database migration pattern
+For existing databases, PostgreSQL supports `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`:
+```python
+await database.execute("""
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS last_activity TEXT
+""")
+```
+Wrapped in try/except for databases that don't support `IF NOT EXISTS`.
+
+### Test behavior changes
+The original `test_join_already_claimed_allows_rejoin` test assumed rejoining was always allowed. With session exclusivity, this behavior changed:
+- **Old**: Second login attempt succeeds (same user rejoins)
+- **New**: Second login attempt blocked if first user is active
+
+Updated the test to reflect the new expected behavior: `test_join_already_claimed_blocks_if_active`.
+
+### Test count increased from 80 to 85
+Added 5 new tests covering session exclusivity:
+- `test_active_session_blocks_new_login` - Active user blocks new login attempt
+- `test_stale_session_allows_takeover` - Inactive (>30s) session allows takeover
+- `test_activity_updates_on_partial_poll` - HTMX poll updates last_activity
+- `test_first_login_sets_activity` - First login sets activity timestamp
+- `test_unclaimed_participant_no_active_check` - Unclaimed participant has no session check

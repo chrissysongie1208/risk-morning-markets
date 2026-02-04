@@ -85,8 +85,8 @@ async def test_join_unique_name(client):
 
 
 @pytest.mark.asyncio
-async def test_join_already_claimed_allows_rejoin(client):
-    """POST /join with already claimed participant -> allows rejoin (same user)"""
+async def test_join_already_claimed_blocks_if_active(client):
+    """POST /join with already claimed participant -> blocked if user is active (session exclusivity)"""
     # Create a pre-registered participant
     participant_id = await create_participant_and_get_id("ClaimedUser")
 
@@ -99,7 +99,8 @@ async def test_join_already_claimed_allows_rejoin(client):
     assert response1.status_code == 303
     assert response1.headers["location"] == "/markets"
 
-    # Same participant joins again - should work (returns same user session)
+    # Another attempt to join with the same participant should be blocked
+    # (because the first user just logged in and is considered "active")
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client2:
         response2 = await client2.post(
@@ -108,9 +109,10 @@ async def test_join_already_claimed_allows_rejoin(client):
             follow_redirects=False
         )
 
-        # Should still redirect to /markets (same user rejoins)
+        # Should be rejected with "already in use" error (session exclusivity)
         assert response2.status_code == 303
-        assert response2.headers["location"] == "/markets"
+        assert "error=" in response2.headers["location"]
+        assert "in+use" in response2.headers["location"].lower() or "already" in response2.headers["location"].lower()
 
 
 # ============ Pre-registered Participants Tests ============
@@ -1157,3 +1159,210 @@ async def test_no_redirect_on_open_market(admin_client):
     assert "HX-Redirect" not in response.headers
     # Should contain the position content
     assert 'id="position-content"' in response.text
+
+
+# ============ Session Exclusivity Tests (TODO-030) ============
+
+@pytest.mark.asyncio
+async def test_active_session_blocks_new_login():
+    """If participant is claimed and user is active, reject new login attempt."""
+    transport = ASGITransport(app=app)
+
+    # Create a participant
+    participant_id = await create_participant_and_get_id("ActiveUser")
+
+    # First user claims the participant
+    async with AsyncClient(transport=transport, base_url="http://test") as user1:
+        response1 = await user1.post(
+            "/join",
+            data={"participant_id": participant_id},
+            follow_redirects=False
+        )
+        assert response1.status_code == 303
+        assert response1.headers["location"] == "/markets"
+
+        # Simulate activity by polling the partial endpoint
+        # First need to create a market for the partial endpoint to work
+        async with AsyncClient(transport=transport, base_url="http://test") as admin_cl:
+            await admin_cl.post(
+                "/admin/login",
+                data={"username": "chrson", "password": "optiver"},
+                follow_redirects=False
+            )
+            await admin_cl.post(
+                "/admin/markets",
+                data={"question": "Activity tracking test?"},
+                follow_redirects=True
+            )
+
+        markets = await db.get_all_markets()
+        market = next((m for m in markets if "Activity tracking test" in m.question), None)
+        assert market is not None
+
+        # User 1 polls the partial endpoint - this updates their activity
+        await user1.get(f"/partials/market/{market.id}")
+
+    # Now another user tries to login with the same participant
+    # (within the 30 second window)
+    async with AsyncClient(transport=transport, base_url="http://test") as user2:
+        response2 = await user2.post(
+            "/join",
+            data={"participant_id": participant_id},
+            follow_redirects=False
+        )
+
+        # Should be rejected with error
+        assert response2.status_code == 303
+        assert "error=" in response2.headers["location"]
+        assert "in+use" in response2.headers["location"].lower() or "already" in response2.headers["location"].lower()
+
+
+@pytest.mark.asyncio
+async def test_stale_session_allows_takeover():
+    """If participant is claimed but user is inactive (>30s), allow takeover."""
+    from datetime import datetime, timedelta
+
+    transport = ASGITransport(app=app)
+
+    # Create a participant
+    participant_id = await create_participant_and_get_id("StaleSessionUser")
+
+    # First user claims the participant
+    async with AsyncClient(transport=transport, base_url="http://test") as user1:
+        response1 = await user1.post(
+            "/join",
+            data={"participant_id": participant_id},
+            follow_redirects=False
+        )
+        assert response1.status_code == 303
+        assert response1.headers["location"] == "/markets"
+
+    # Manually set the last_activity to > 30 seconds ago to simulate stale session
+    participant = await db.get_participant_by_id(participant_id)
+    assert participant is not None
+    assert participant.claimed_by_user_id is not None
+
+    stale_time = (datetime.utcnow() - timedelta(seconds=60)).isoformat()
+    await db.database.execute(
+        "UPDATE users SET last_activity = :stale WHERE id = :id",
+        {"stale": stale_time, "id": participant.claimed_by_user_id}
+    )
+
+    # Now another user tries to login - should be allowed (stale session)
+    async with AsyncClient(transport=transport, base_url="http://test") as user2:
+        response2 = await user2.post(
+            "/join",
+            data={"participant_id": participant_id},
+            follow_redirects=False
+        )
+
+        # Should succeed - takeover allowed
+        assert response2.status_code == 303
+        assert response2.headers["location"] == "/markets"
+        assert "session" in response2.cookies
+
+
+@pytest.mark.asyncio
+async def test_activity_updates_on_partial_poll(admin_client):
+    """HTMX partial endpoint updates user's last_activity timestamp."""
+    from datetime import datetime, timedelta
+
+    # Create a market
+    await admin_client.post(
+        "/admin/markets",
+        data={"question": "Activity update test market?"},
+        follow_redirects=True
+    )
+
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "Activity update test market" in m.question), None)
+    assert market is not None
+
+    # Get the admin user and check their activity before
+    admin_user = await db.get_user_by_name("chrson")
+    assert admin_user is not None
+
+    # Set activity to old timestamp
+    old_time = (datetime.utcnow() - timedelta(seconds=60)).isoformat()
+    await db.database.execute(
+        "UPDATE users SET last_activity = :old WHERE id = :id",
+        {"old": old_time, "id": admin_user.id}
+    )
+
+    # Verify it's old
+    user_before = await db.get_user_by_id(admin_user.id)
+    assert user_before.last_activity is not None
+    assert (datetime.utcnow() - user_before.last_activity).total_seconds() > 30
+
+    # Poll the partial endpoint
+    response = await admin_client.get(f"/partials/market/{market.id}")
+    assert response.status_code == 200
+
+    # Check that activity was updated
+    user_after = await db.get_user_by_id(admin_user.id)
+    assert user_after.last_activity is not None
+
+    # Activity should be recent (within 5 seconds)
+    elapsed = (datetime.utcnow() - user_after.last_activity).total_seconds()
+    assert elapsed < 5, f"Expected activity to be updated recently, but elapsed time was {elapsed}s"
+
+
+@pytest.mark.asyncio
+async def test_first_login_sets_activity():
+    """First login (new participant claim) sets last_activity timestamp."""
+    from datetime import datetime
+
+    transport = ASGITransport(app=app)
+
+    # Create a participant
+    participant_id = await create_participant_and_get_id("FirstLoginUser")
+
+    # Join as this participant
+    async with AsyncClient(transport=transport, base_url="http://test") as user_cl:
+        response = await user_cl.post(
+            "/join",
+            data={"participant_id": participant_id},
+            follow_redirects=False
+        )
+        assert response.status_code == 303
+
+    # Check that the user has last_activity set
+    user = await db.get_user_by_name("FirstLoginUser")
+    assert user is not None
+    assert user.last_activity is not None
+
+    # Activity should be very recent (within 5 seconds)
+    elapsed = (datetime.utcnow() - user.last_activity).total_seconds()
+    assert elapsed < 5
+
+
+@pytest.mark.asyncio
+async def test_unclaimed_participant_no_active_check():
+    """Unclaimed participant can always be claimed (no active session to check)."""
+    transport = ASGITransport(app=app)
+
+    # Create TWO participants
+    participant1_id = await create_participant_and_get_id("UnclaimedTestUser1")
+    participant2_id = await create_participant_and_get_id("UnclaimedTestUser2")
+
+    # First user claims participant1
+    async with AsyncClient(transport=transport, base_url="http://test") as user1:
+        response1 = await user1.post(
+            "/join",
+            data={"participant_id": participant1_id},
+            follow_redirects=False
+        )
+        assert response1.status_code == 303
+
+    # Second user should be able to claim the UNCLAIMED participant2
+    # (regardless of participant1's activity)
+    async with AsyncClient(transport=transport, base_url="http://test") as user2:
+        response2 = await user2.post(
+            "/join",
+            data={"participant_id": participant2_id},
+            follow_redirects=False
+        )
+
+        # Should succeed - different unclaimed participant
+        assert response2.status_code == 303
+        assert response2.headers["location"] == "/markets"

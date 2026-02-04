@@ -82,13 +82,22 @@ def verify_admin_credentials(username: str, password: str) -> bool:
     return username == ADMIN_USERNAME and password == ADMIN_PASSWORD
 
 
+# Session exclusivity timeout in seconds
+SESSION_ACTIVITY_TIMEOUT = 30
+
+
 async def login_participant(participant_id: str) -> tuple[User, str]:
     """Claim a pre-registered participant and return (user, session_token).
 
     The participant must exist and not be claimed by another user.
     Creates a new user record linked to the participant.
 
-    Raises ValueError if participant doesn't exist or is already claimed.
+    Session exclusivity: If the participant is claimed AND the user has been
+    active within SESSION_ACTIVITY_TIMEOUT seconds, reject the login attempt.
+    If the session is stale (no activity for > timeout), allow takeover.
+
+    Raises ValueError if participant doesn't exist, is already claimed with
+    an active session, or other errors.
     """
     # Get the participant
     participant = await db.get_participant_by_id(participant_id)
@@ -96,9 +105,17 @@ async def login_participant(participant_id: str) -> tuple[User, str]:
         raise ValueError("Participant not found")
 
     if participant.claimed_by_user_id:
-        # If already claimed, check if user exists and return session for them
+        # Participant is claimed - check if user has an active session
         existing_user = await db.get_user_by_id(participant.claimed_by_user_id)
         if existing_user:
+            # Check if the existing user has an active session
+            if await db.is_user_active(existing_user.id, SESSION_ACTIVITY_TIMEOUT):
+                # Active session exists - reject login
+                raise ValueError("Participant already in use")
+
+            # Session is stale - allow takeover by creating new session
+            # Update activity timestamp to mark the takeover
+            await db.update_user_activity(existing_user.id)
             token = create_session(existing_user.id)
             return existing_user, token
         # User was deleted but participant still claimed - should not happen
@@ -109,6 +126,7 @@ async def login_participant(participant_id: str) -> tuple[User, str]:
     if existing_user:
         # User exists - link participant to them and create session
         await db.claim_participant(participant_id, existing_user.id)
+        await db.update_user_activity(existing_user.id)
         token = create_session(existing_user.id)
         return existing_user, token
 
@@ -117,6 +135,9 @@ async def login_participant(participant_id: str) -> tuple[User, str]:
 
     # Link participant to user
     await db.claim_participant(participant_id, user.id)
+
+    # Update activity timestamp for new user
+    await db.update_user_activity(user.id)
 
     token = create_session(user.id)
     return user, token

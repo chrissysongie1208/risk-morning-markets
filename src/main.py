@@ -723,10 +723,14 @@ async def partial_market_all(
     Returns all three sections in one response using hx-swap-oob.
     This reduces HTTP requests from 3/sec to 1/sec per user.
     Auto-redirects to results page when market is settled.
+    Also updates user's last_activity timestamp for session exclusivity.
     """
     user = await auth.get_current_user(session)
     if not user:
         return HTMLResponse(content="<p>Session expired. Please refresh.</p>")
+
+    # Update user activity timestamp for session exclusivity tracking
+    await db.update_user_activity(user.id)
 
     market = await db.get_market(market_id)
     if not market:

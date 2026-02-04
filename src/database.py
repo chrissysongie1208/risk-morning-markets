@@ -55,7 +55,8 @@ async def init_db() -> None:
             id TEXT PRIMARY KEY,
             display_name TEXT UNIQUE NOT NULL,
             is_admin INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            last_activity TEXT
         )
     """)
 
@@ -154,6 +155,15 @@ async def init_db() -> None:
         ON CONFLICT (key) DO NOTHING
     """, {"key": "position_limit", "value": str(DEFAULT_POSITION_LIMIT)})
 
+    # Migration: Add last_activity column if it doesn't exist (for existing databases)
+    try:
+        await database.execute("""
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS last_activity TEXT
+        """)
+    except Exception:
+        # Column may already exist or database doesn't support IF NOT EXISTS
+        pass
+
 
 # ============ User Operations ============
 
@@ -196,7 +206,8 @@ async def get_user_by_id(user_id: str) -> Optional[User]:
             id=row["id"],
             display_name=row["display_name"],
             is_admin=bool(row["is_admin"]),
-            created_at=datetime.fromisoformat(row["created_at"])
+            created_at=datetime.fromisoformat(row["created_at"]),
+            last_activity=datetime.fromisoformat(row["last_activity"]) if row["last_activity"] else None
         )
     return None
 
@@ -211,9 +222,37 @@ async def get_user_by_name(display_name: str) -> Optional[User]:
             id=row["id"],
             display_name=row["display_name"],
             is_admin=bool(row["is_admin"]),
-            created_at=datetime.fromisoformat(row["created_at"])
+            created_at=datetime.fromisoformat(row["created_at"]),
+            last_activity=datetime.fromisoformat(row["last_activity"]) if row["last_activity"] else None
         )
     return None
+
+
+async def update_user_activity(user_id: str) -> None:
+    """Update a user's last_activity timestamp to now."""
+    now = datetime.utcnow().isoformat()
+    await database.execute(
+        "UPDATE users SET last_activity = :now WHERE id = :id",
+        {"now": now, "id": user_id}
+    )
+
+
+async def is_user_active(user_id: str, timeout_seconds: int = 30) -> bool:
+    """Check if a user has been active within the timeout period.
+
+    Args:
+        user_id: The user ID to check.
+        timeout_seconds: Number of seconds to consider a session "active".
+
+    Returns:
+        True if the user's last_activity is within timeout_seconds of now.
+    """
+    user = await get_user_by_id(user_id)
+    if not user or not user.last_activity:
+        return False
+
+    elapsed = (datetime.utcnow() - user.last_activity).total_seconds()
+    return elapsed < timeout_seconds
 
 
 # ============ Market Operations ============

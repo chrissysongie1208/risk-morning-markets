@@ -29,6 +29,7 @@ class User(BaseModel):
     display_name: str
     is_admin: bool = False
     created_at: datetime
+    last_activity: Optional[datetime] = None
 
 
 class Participant(BaseModel):
