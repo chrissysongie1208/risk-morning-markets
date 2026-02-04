@@ -56,7 +56,7 @@
 
 - [x] TODO-026: Add settle button to market page for admin - When admin views a market page and market is OPEN, show a "Settle Market" form directly on the page (not just in Admin panel). Form has settlement value input and submit button. Non-admin users don't see this form. This lets admin settle without navigating away from the market view.
 
-- [ ] TODO-027: Auto-redirect to results when market settles - When market is SETTLED and user is on the market page, automatically redirect to results page. Implement via: (a) HTMX partial returns a redirect header/meta refresh when market.status == SETTLED, or (b) Add market status to partial response and use HTMX `hx-trigger` with custom event, or (c) Simple JS check on partial response. Choose simplest approach that works.
+- [x] TODO-027: Auto-redirect to results when market settles - When market is SETTLED and user is on the market page, automatically redirect to results page. Implement via: (a) HTMX partial returns a redirect header/meta refresh when market.status == SETTLED, or (b) Add market status to partial response and use HTMX `hx-trigger` with custom event, or (c) Simple JS check on partial response. Choose simplest approach that works.
 
 - [ ] TODO-028: Add tests for combined partial endpoint - Test that single endpoint returns all 3 sections. Test that old endpoints still work (backward compat). Test performance improvement is measurable.
 

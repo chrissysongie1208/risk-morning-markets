@@ -722,6 +722,7 @@ async def partial_market_all(
 
     Returns all three sections in one response using hx-swap-oob.
     This reduces HTTP requests from 3/sec to 1/sec per user.
+    Auto-redirects to results page when market is settled.
     """
     user = await auth.get_current_user(session)
     if not user:
@@ -730,6 +731,13 @@ async def partial_market_all(
     market = await db.get_market(market_id)
     if not market:
         return HTMLResponse(content="<p>Market not found.</p>")
+
+    # Auto-redirect to results when market is settled
+    if market.status == MarketStatus.SETTLED:
+        return HTMLResponse(
+            content="",
+            headers={"HX-Redirect": f"/markets/{market_id}/results"}
+        )
 
     # Get order book (all open orders)
     bids = await db.get_open_orders(market_id, side=OrderSide.BID)

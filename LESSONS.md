@@ -270,3 +270,34 @@ The simplest solution was adding a conditional section in `market.html`:
 
 ### Template-only change
 No backend changes needed - the settle POST endpoint already handles OPEN markets (since TODO-024). This is a pure frontend UX improvement, which keeps the change minimal and low-risk.
+
+---
+
+## Auto-redirect with HX-Redirect (TODO-027) - 2026-02-04
+
+### HTMX native redirect support
+HTMX supports the `HX-Redirect` response header, which triggers a full-page redirect in the browser. This is the simplest way to redirect users when a polled endpoint detects a state change.
+
+**Implementation:**
+```python
+if market.status == MarketStatus.SETTLED:
+    return HTMLResponse(
+        content="",
+        headers={"HX-Redirect": f"/markets/{market_id}/results"}
+    )
+```
+
+### Why HX-Redirect over alternatives
+Three approaches were considered:
+1. **HX-Redirect header** (chosen) - Cleanest, HTMX-native, no JS needed
+2. **Custom HTMX event + JS handler** - More complex, requires client-side code
+3. **Meta refresh in HTML** - Works but less elegant, flickers
+
+The HX-Redirect approach:
+- Requires no JavaScript
+- Works with existing HTMX polling
+- Is a single line of code in the endpoint
+- Doesn't require template changes
+
+### Polling continues after redirect
+Note that once redirected to the results page, there's no HTMX polling anymore since results are static. The redirect is a one-way transition from the live market view to the final results.
