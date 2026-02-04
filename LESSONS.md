@@ -301,3 +301,26 @@ The HX-Redirect approach:
 
 ### Polling continues after redirect
 Note that once redirected to the results page, there's no HTMX polling anymore since results are static. The redirect is a one-way transition from the live market view to the final results.
+
+---
+
+## Testing Combined Partial Endpoints (TODO-028) - 2026-02-04
+
+### What to test for combined HTMX endpoints
+When testing a combined partial endpoint that uses `hx-swap-oob`, verify:
+
+1. **All sections present**: Check that the response contains all expected div IDs (e.g., `position-content`, `orderbook`, `trades`)
+2. **OOB attributes**: Verify `hx-swap-oob="innerHTML"` appears on the secondary sections
+3. **Data flows through**: Test that actual data (orders, positions, trades) appears in the response when present
+4. **Special behaviors**: Test edge cases like the HX-Redirect header when market status changes
+
+### Testing backward compatibility for deprecated endpoints
+When deprecating but keeping old endpoints:
+1. Write explicit tests for each deprecated endpoint to ensure they still return valid responses
+2. Tests serve as documentation that these endpoints exist and are intentionally maintained
+3. If a deprecated endpoint is removed later, the failing test reminds you to handle the migration
+
+### Test count increased from 67 to 74
+Added 7 new tests covering combined partial endpoint and backward compatibility:
+- 4 tests for combined `/partials/market/{id}` endpoint
+- 3 tests for deprecated individual partial endpoints (orderbook, position, trades)

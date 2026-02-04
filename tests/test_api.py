@@ -743,3 +743,207 @@ async def test_full_trade_lifecycle():
 
     assert result_b.linear_pnl == 50.0
     assert result_b.binary_pnl == 5  # Bought 5 lots below settlement = won 5 lots
+
+
+# ============ Combined Partial Endpoint Tests (TODO-028) ============
+
+@pytest.mark.asyncio
+async def test_combined_partial_returns_all_sections(admin_client):
+    """GET /partials/market/{id} returns position, orderbook, and trades in one response."""
+    # Create a market
+    await admin_client.post(
+        "/admin/markets",
+        data={"question": "Combined partial test market?"},
+        follow_redirects=True
+    )
+
+    # Find the market
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "Combined partial test market" in m.question), None)
+    assert market is not None
+
+    # Place some orders for orderbook
+    await admin_client.post(
+        f"/markets/{market.id}/orders",
+        data={"side": "BID", "price": "95", "quantity": "3"},
+        follow_redirects=True
+    )
+    await admin_client.post(
+        f"/markets/{market.id}/orders",
+        data={"side": "OFFER", "price": "105", "quantity": "3"},
+        follow_redirects=True
+    )
+
+    # Get combined partial
+    response = await admin_client.get(f"/partials/market/{market.id}")
+
+    assert response.status_code == 200
+    content = response.text
+
+    # Verify all 3 sections are present
+    # Position section
+    assert 'id="position-content"' in content
+
+    # Orderbook section with OOB swap
+    assert 'id="orderbook"' in content
+    assert 'hx-swap-oob="innerHTML"' in content
+    assert "Bids (Buy Orders)" in content
+    assert "Offers (Sell Orders)" in content
+
+    # Trades section with OOB swap
+    assert 'id="trades"' in content
+    # The trades div should have OOB attribute
+    assert content.count('hx-swap-oob="innerHTML"') >= 2  # orderbook and trades both have it
+
+
+@pytest.mark.asyncio
+async def test_combined_partial_shows_position_data(admin_client):
+    """GET /partials/market/{id} shows user's position correctly."""
+    # Create a market
+    await admin_client.post(
+        "/admin/markets",
+        data={"question": "Position partial test?"},
+        follow_redirects=True
+    )
+
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "Position partial test" in m.question), None)
+    assert market is not None
+
+    # No trades yet - position should show "No position"
+    response = await admin_client.get(f"/partials/market/{market.id}")
+    assert response.status_code == 200
+    assert "No position" in response.text
+
+
+@pytest.mark.asyncio
+async def test_combined_partial_shows_orderbook_data(admin_client):
+    """GET /partials/market/{id} shows orders in the orderbook."""
+    # Create a market
+    await admin_client.post(
+        "/admin/markets",
+        data={"question": "Orderbook partial test?"},
+        follow_redirects=True
+    )
+
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "Orderbook partial test" in m.question), None)
+    assert market is not None
+
+    # Place a bid
+    await admin_client.post(
+        f"/markets/{market.id}/orders",
+        data={"side": "BID", "price": "99.50", "quantity": "7"},
+        follow_redirects=True
+    )
+
+    response = await admin_client.get(f"/partials/market/{market.id}")
+    assert response.status_code == 200
+
+    # Should show the bid price and quantity
+    assert "99.50" in response.text
+    assert "7" in response.text or ">7<" in response.text
+
+
+@pytest.mark.asyncio
+async def test_combined_partial_redirects_when_settled(admin_client):
+    """GET /partials/market/{id} returns HX-Redirect header when market is settled."""
+    # Create and settle a market
+    await admin_client.post(
+        "/admin/markets",
+        data={"question": "Settled partial test?"},
+        follow_redirects=True
+    )
+
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "Settled partial test" in m.question), None)
+    assert market is not None
+
+    # Settle the market
+    await admin_client.post(
+        f"/admin/markets/{market.id}/settle",
+        data={"settlement_value": "100"},
+        follow_redirects=True
+    )
+
+    # Now request the combined partial
+    response = await admin_client.get(f"/partials/market/{market.id}")
+
+    # Should return HX-Redirect header for HTMX to redirect to results
+    assert response.status_code == 200
+    assert "HX-Redirect" in response.headers
+    assert f"/markets/{market.id}/results" in response.headers["HX-Redirect"]
+
+
+# ============ Backward Compatibility Tests for Old Partials (TODO-028) ============
+
+@pytest.mark.asyncio
+async def test_deprecated_orderbook_partial_still_works(admin_client):
+    """GET /partials/orderbook/{id} (deprecated) still returns orderbook HTML."""
+    # Create a market
+    await admin_client.post(
+        "/admin/markets",
+        data={"question": "Deprecated orderbook test?"},
+        follow_redirects=True
+    )
+
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "Deprecated orderbook test" in m.question), None)
+    assert market is not None
+
+    # Place an order
+    await admin_client.post(
+        f"/markets/{market.id}/orders",
+        data={"side": "OFFER", "price": "102", "quantity": "4"},
+        follow_redirects=True
+    )
+
+    # Use deprecated endpoint
+    response = await admin_client.get(f"/partials/orderbook/{market.id}")
+
+    assert response.status_code == 200
+    assert "Bids (Buy Orders)" in response.text
+    assert "Offers (Sell Orders)" in response.text
+    assert "102" in response.text  # Our order price
+
+
+@pytest.mark.asyncio
+async def test_deprecated_position_partial_still_works(admin_client):
+    """GET /partials/position/{id} (deprecated) still returns position HTML."""
+    # Create a market
+    await admin_client.post(
+        "/admin/markets",
+        data={"question": "Deprecated position test?"},
+        follow_redirects=True
+    )
+
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "Deprecated position test" in m.question), None)
+    assert market is not None
+
+    response = await admin_client.get(f"/partials/position/{market.id}")
+
+    assert response.status_code == 200
+    # Should show "No position" since we haven't traded
+    assert "No position" in response.text or "position" in response.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_deprecated_trades_partial_still_works(admin_client):
+    """GET /partials/trades/{id} (deprecated) still returns trades HTML."""
+    # Create a market
+    await admin_client.post(
+        "/admin/markets",
+        data={"question": "Deprecated trades test?"},
+        follow_redirects=True
+    )
+
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "Deprecated trades test" in m.question), None)
+    assert market is not None
+
+    response = await admin_client.get(f"/partials/trades/{market.id}")
+
+    assert response.status_code == 200
+    # Should show "No trades yet" since we haven't traded
+    assert "No trades" in response.text or "trades" in response.text.lower()
