@@ -436,3 +436,74 @@ Added 4 new tests:
 - `test_active_participants_not_unclaimed_on_index` - Active participants stay claimed
 - `test_cleanup_stale_participants_returns_count` - Function returns unclaim count
 - `test_cleanup_stale_participants_with_no_activity` - NULL activity treated as stale
+
+---
+
+## UI Polish: Trade Feedback and Position Display (TODO-032) - 2026-02-04
+
+### Trade fill detection via HTMX events
+HTMX fires `htmx:afterSwap` events when content is replaced. By storing the previous position value in a `data-position` attribute and comparing after each swap, we can detect when a trade has filled:
+
+```javascript
+document.body.addEventListener('htmx:afterSwap', function(event) {
+    if (event.detail.target.id !== 'position-content') return;
+    const newPosition = parseInt(positionContent.dataset.position, 10);
+    if (newPosition !== previousPosition) {
+        // Trade happened!
+        flashPosition(newPosition > previousPosition);  // green for buy, red for sell
+    }
+    previousPosition = newPosition;
+});
+```
+
+Key insight: The `data-position` attribute is set in the Jinja template, so it survives the HTMX swap and is always current.
+
+### Web Audio API for sounds (no files needed)
+Instead of requiring an audio file, use the Web Audio API to generate simple beeps:
+- Create an OscillatorNode with a sine wave
+- Use 880Hz (high pitch) for buys, 440Hz (low pitch) for sells
+- Short duration (150ms) with exponential decay for a pleasant "ping" sound
+- No external dependencies or files to serve
+
+Browser autoplay restriction: Audio context must be initialized after user interaction. Use `document.addEventListener('click', initAudio, { once: true })` to enable sound on first click.
+
+### CSS animations for position flash
+Use CSS `@keyframes` animations for the visual flash effect:
+```css
+@keyframes flash-green {
+    0% { background-color: rgba(34, 197, 94, 0.4); }
+    100% { background-color: transparent; }
+}
+.flash-buy { animation: flash-green 0.8s ease-out; }
+```
+
+To restart animation on repeated fills, force a DOM reflow:
+```javascript
+positionBox.classList.remove('flash-buy', 'flash-sell');
+void positionBox.offsetWidth;  // Force reflow
+positionBox.classList.add(isBuy ? 'flash-buy' : 'flash-sell');
+```
+
+### Hero position display
+Made the position section a "hero" element with:
+- Larger font (2.5rem for quantity, 1.25rem for average price)
+- Card-style background using Pico CSS variables
+- Color coding: green for LONG, red for SHORT, gray for FLAT
+- Clear format: "+5 lots" with sign for direction
+
+### Highlighting own orders
+Added `.own-order` CSS class to orderbook rows where `order.user_id == user.id`:
+- Subtle purple background (`rgba(99, 102, 241, 0.15)`)
+- Bold text for own orders
+- "(you)" label next to username for extra clarity
+
+### Template consistency
+When updating a partial template, update ALL versions:
+- `market_all.html` (combined endpoint - primary)
+- `position.html` (deprecated standalone)
+- `orderbook.html` (deprecated standalone)
+
+Even deprecated templates should stay consistent for backward compatibility.
+
+### No test changes needed
+This was a pure frontend/CSS change - no backend logic affected, so all 89 existing tests continue to pass.

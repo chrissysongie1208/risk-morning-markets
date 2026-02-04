@@ -49,6 +49,46 @@
         .win { color: #22c55e; font-weight: bold; }
         .loss { color: #ef4444; font-weight: bold; }
         .breakeven { color: #6b7280; font-weight: bold; }
+
+        /* Position hero display */
+        .position-hero {
+            font-size: 1.5rem;
+            padding: 1rem;
+            background: var(--pico-card-background-color);
+            border-radius: 0.5rem;
+            text-align: center;
+        }
+        .position-hero .position-qty {
+            font-size: 2.5rem;
+            font-weight: bold;
+        }
+        .position-hero .position-long { color: #22c55e; }
+        .position-hero .position-short { color: #ef4444; }
+        .position-hero .position-flat { color: #6b7280; }
+        .position-hero .position-avg {
+            font-size: 1.25rem;
+            color: var(--pico-muted-color);
+        }
+
+        /* Trade fill flash animation */
+        @keyframes flash-green {
+            0% { background-color: rgba(34, 197, 94, 0.4); }
+            100% { background-color: transparent; }
+        }
+        @keyframes flash-red {
+            0% { background-color: rgba(239, 68, 68, 0.4); }
+            100% { background-color: transparent; }
+        }
+        .flash-buy { animation: flash-green 0.8s ease-out; }
+        .flash-sell { animation: flash-red 0.8s ease-out; }
+
+        /* Highlight own orders in orderbook */
+        .own-order {
+            background-color: rgba(99, 102, 241, 0.15);
+        }
+        .own-order td {
+            font-weight: 600;
+        }
     </style>
     {% block extra_head %}{% endblock %}
 </head>

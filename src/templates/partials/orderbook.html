@@ -1,3 +1,4 @@
+{# Standalone orderbook partial (deprecated - use market_all.html instead) #}
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
     <!-- Bids -->
     <div>
@@ -14,8 +15,8 @@
             </thead>
             <tbody>
                 {% for order in bids %}
-                <tr>
-                    <td>{{ order.display_name }}</td>
+                <tr{% if order.user_id == user.id %} class="own-order"{% endif %}>
+                    <td>{{ order.display_name }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</td>
                     <td class="bid">{{ "%.2f"|format(order.price) }}</td>
                     <td>{{ order.remaining_quantity }}</td>
                     <td>
@@ -51,8 +52,8 @@
             </thead>
             <tbody>
                 {% for order in offers %}
-                <tr>
-                    <td>{{ order.display_name }}</td>
+                <tr{% if order.user_id == user.id %} class="own-order"{% endif %}>
+                    <td>{{ order.display_name }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</td>
                     <td class="offer">{{ "%.2f"|format(order.price) }}</td>
                     <td>{{ order.remaining_quantity }}</td>
                     <td>

@@ -2,6 +2,97 @@
 
 {% block title %}{{ market.question[:50] }} - Morning Markets{% endblock %}
 
+{% block extra_head %}
+<script>
+// Trade fill detection and feedback
+(function() {
+    let previousPosition = null;
+    let audioContext = null;
+    let soundEnabled = false;
+
+    // Initialize audio on first user interaction (required by browsers)
+    function initAudio() {
+        if (audioContext) return;
+        try {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            soundEnabled = true;
+        } catch (e) {
+            console.log('Web Audio not supported');
+        }
+    }
+
+    // Play a simple beep using Web Audio API
+    function playBeep(isBuy) {
+        if (!audioContext || !soundEnabled) return;
+
+        try {
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            // Higher pitch for buy, lower for sell
+            oscillator.frequency.value = isBuy ? 880 : 440;
+            oscillator.type = 'sine';
+
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + 0.15);
+        } catch (e) {
+            console.log('Audio error:', e);
+        }
+    }
+
+    // Flash the position box
+    function flashPosition(isBuy) {
+        const positionBox = document.getElementById('position-content');
+        if (!positionBox) return;
+
+        // Remove any existing flash class
+        positionBox.classList.remove('flash-buy', 'flash-sell');
+
+        // Force reflow to restart animation
+        void positionBox.offsetWidth;
+
+        // Add appropriate flash class
+        positionBox.classList.add(isBuy ? 'flash-buy' : 'flash-sell');
+    }
+
+    // Enable audio on first click anywhere on page
+    document.addEventListener('click', initAudio, { once: true });
+
+    // Listen for HTMX after-swap events to detect position changes
+    document.body.addEventListener('htmx:afterSwap', function(event) {
+        // Only process swaps that affect the position
+        if (!event.detail.target || event.detail.target.id !== 'position-content') return;
+
+        const positionContent = document.getElementById('position-content');
+        if (!positionContent) return;
+
+        const newPosition = parseInt(positionContent.dataset.position || '0', 10);
+
+        // Skip the first load (no previous value to compare)
+        if (previousPosition === null) {
+            previousPosition = newPosition;
+            return;
+        }
+
+        // Detect if position changed (trade happened)
+        if (newPosition !== previousPosition) {
+            const isBuy = newPosition > previousPosition;
+            playBeep(isBuy);
+            flashPosition(isBuy);
+        }
+
+        previousPosition = newPosition;
+    });
+})();
+</script>
+{% endblock %}
+
 {% block content %}
 <article>
     <header>
