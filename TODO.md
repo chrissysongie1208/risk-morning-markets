@@ -72,7 +72,7 @@
 
 - [x] TODO-034: WebSocket backend - Add real-time push updates via WebSocket. Create `ConnectionManager` class to track connected clients per market. Add `/ws/market/{market_id}` WebSocket endpoint in main.py. Implement `broadcast()` method to push HTML updates to all connected clients. Call broadcast when: order placed, order cancelled, trade happens, market settled. Add ping/pong keepalive (30s interval) to detect stale connections. Handle client disconnection gracefully. This replaces polling with instant updates.
 
-- [ ] TODO-035: WebSocket frontend - Replace HTMX polling with WebSocket client. Add JavaScript to market.html that: (1) Connects to `wss://[host]/ws/market/{id}` on page load. (2) Updates DOM when message received (position, orderbook, trades sections). (3) Handles reconnection with exponential backoff (1s, 2s, 4s... max 60s) on disconnect. (4) Integrates with trade sound/flash from TODO-032. (5) Falls back to polling if WebSocket fails. Remove or disable HTMX `hx-trigger` polling since WebSocket handles updates.
+- [x] TODO-035: WebSocket frontend - Replace HTMX polling with WebSocket client. Add JavaScript to market.html that: (1) Connects to `wss://[host]/ws/market/{id}` on page load. (2) Updates DOM when message received (position, orderbook, trades sections). (3) Handles reconnection with exponential backoff (1s, 2s, 4s... max 60s) on disconnect. (4) Integrates with trade sound/flash from TODO-032. (5) Falls back to polling if WebSocket fails. Remove or disable HTMX `hx-trigger` polling since WebSocket handles updates.
 
 <!-- Add new TODOs here with sequential IDs -->
 

@@ -4,8 +4,20 @@
 
 {% block extra_head %}
 <script>
-// Trade fill detection and feedback
+// WebSocket-powered real-time updates with HTMX polling fallback
 (function() {
+    // Market ID from URL
+    const marketId = '{{ market.id }}';
+
+    // WebSocket state
+    let ws = null;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_DELAY = 60000; // 60 seconds max
+    const INITIAL_RECONNECT_DELAY = 1000; // 1 second
+    let reconnectTimeout = null;
+    let usingWebSocket = false;
+
+    // Position tracking for trade feedback
     let previousPosition = null;
     let audioContext = null;
     let soundEnabled = false;
@@ -61,14 +73,8 @@
         positionBox.classList.add(isBuy ? 'flash-buy' : 'flash-sell');
     }
 
-    // Enable audio on first click anywhere on page
-    document.addEventListener('click', initAudio, { once: true });
-
-    // Listen for HTMX after-swap events to detect position changes
-    document.body.addEventListener('htmx:afterSwap', function(event) {
-        // Only process swaps that affect the position
-        if (!event.detail.target || event.detail.target.id !== 'position-content') return;
-
+    // Check position change and trigger feedback
+    function checkPositionChange() {
         const positionContent = document.getElementById('position-content');
         if (!positionContent) return;
 
@@ -88,6 +94,198 @@
         }
 
         previousPosition = newPosition;
+    }
+
+    // Update DOM from WebSocket HTML message
+    function updateFromWebSocket(html) {
+        // Parse the HTML response
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+
+        // Update position content
+        const newPositionContent = doc.getElementById('position-content');
+        if (newPositionContent) {
+            const positionTarget = document.getElementById('position-content');
+            if (positionTarget) {
+                positionTarget.innerHTML = newPositionContent.innerHTML;
+                // Copy data attributes
+                for (const attr of newPositionContent.attributes) {
+                    positionTarget.setAttribute(attr.name, attr.value);
+                }
+            }
+        }
+
+        // Update orderbook (OOB swap)
+        const newOrderbook = doc.getElementById('orderbook');
+        if (newOrderbook) {
+            const orderbookTarget = document.getElementById('orderbook');
+            if (orderbookTarget) {
+                orderbookTarget.innerHTML = newOrderbook.innerHTML;
+            }
+        }
+
+        // Update trades (OOB swap)
+        const newTrades = doc.getElementById('trades');
+        if (newTrades) {
+            const tradesTarget = document.getElementById('trades');
+            if (tradesTarget) {
+                tradesTarget.innerHTML = newTrades.innerHTML;
+            }
+        }
+
+        // Check for position changes and trigger feedback
+        checkPositionChange();
+    }
+
+    // Calculate reconnect delay with exponential backoff
+    function getReconnectDelay() {
+        const delay = INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttempts);
+        return Math.min(delay, MAX_RECONNECT_DELAY);
+    }
+
+    // Disable HTMX polling
+    function disablePolling() {
+        const positionDiv = document.getElementById('position');
+        if (positionDiv) {
+            positionDiv.removeAttribute('hx-trigger');
+            positionDiv.removeAttribute('hx-get');
+            // Re-process to remove existing polling
+            if (typeof htmx !== 'undefined') {
+                htmx.process(positionDiv);
+            }
+        }
+    }
+
+    // Enable HTMX polling (fallback)
+    function enablePolling() {
+        const positionDiv = document.getElementById('position');
+        if (positionDiv) {
+            positionDiv.setAttribute('hx-trigger', 'every 500ms');
+            positionDiv.setAttribute('hx-get', '/partials/market/' + marketId);
+            positionDiv.setAttribute('hx-swap', 'innerHTML');
+            positionDiv.setAttribute('hx-target', '#position-content');
+            // Re-process to start polling
+            if (typeof htmx !== 'undefined') {
+                htmx.process(positionDiv);
+            }
+        }
+    }
+
+    // Connect to WebSocket
+    function connectWebSocket() {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            return; // Already connected
+        }
+
+        // Build WebSocket URL (wss for https, ws for http)
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = protocol + '//' + window.location.host + '/ws/market/' + marketId;
+
+        try {
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function() {
+                console.log('WebSocket connected');
+                reconnectAttempts = 0;
+                usingWebSocket = true;
+                disablePolling();
+            };
+
+            ws.onmessage = function(event) {
+                const data = event.data;
+
+                // Handle ping from server
+                if (data === '{"type": "ping"}') {
+                    ws.send('{"type": "pong"}');
+                    return;
+                }
+
+                // Handle JSON messages (redirect, etc.)
+                if (data.startsWith('{')) {
+                    try {
+                        const msg = JSON.parse(data);
+                        if (msg.type === 'redirect' && msg.url) {
+                            window.location.href = msg.url;
+                            return;
+                        }
+                    } catch (e) {
+                        // Not valid JSON, continue to check if it's HTML
+                    }
+                }
+
+                // Handle HTML update
+                if (data.includes('<div') || data.includes('<p')) {
+                    updateFromWebSocket(data);
+                }
+            };
+
+            ws.onclose = function(event) {
+                console.log('WebSocket closed:', event.code, event.reason);
+                usingWebSocket = false;
+
+                // Don't reconnect if closed cleanly by server (e.g., market settled)
+                if (event.code === 1000) {
+                    return;
+                }
+
+                // Schedule reconnection with exponential backoff
+                scheduleReconnect();
+            };
+
+            ws.onerror = function(error) {
+                console.log('WebSocket error:', error);
+                // onclose will be called after onerror, so reconnect is handled there
+            };
+        } catch (e) {
+            console.log('WebSocket connection failed:', e);
+            usingWebSocket = false;
+            enablePolling(); // Fall back to polling
+        }
+    }
+
+    // Schedule reconnection with exponential backoff
+    function scheduleReconnect() {
+        if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+        }
+
+        const delay = getReconnectDelay();
+        console.log('Reconnecting in ' + (delay / 1000) + 's...');
+        reconnectAttempts++;
+
+        // Enable polling as fallback while reconnecting
+        if (!usingWebSocket) {
+            enablePolling();
+        }
+
+        reconnectTimeout = setTimeout(function() {
+            connectWebSocket();
+        }, delay);
+    }
+
+    // Enable audio on first click anywhere on page
+    document.addEventListener('click', initAudio, { once: true });
+
+    // Listen for HTMX after-swap events (fallback mode)
+    document.body.addEventListener('htmx:afterSwap', function(event) {
+        // Only process swaps that affect the position (when using HTMX polling)
+        if (!event.detail.target || event.detail.target.id !== 'position-content') return;
+
+        checkPositionChange();
+    });
+
+    // Connect when DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', connectWebSocket);
+    } else {
+        connectWebSocket();
+    }
+
+    // Clean up on page unload
+    window.addEventListener('beforeunload', function() {
+        if (ws) {
+            ws.close(1000, 'Page unload');
+        }
     });
 })();
 </script>

@@ -603,3 +603,71 @@ No new tests were added for WebSocket functionality since:
 3. Frontend integration (TODO-035) will be the true test of the WebSocket system
 
 The backend is ready - frontend integration in TODO-035 will complete the real-time experience.
+
+---
+
+## WebSocket Frontend Implementation (TODO-035) - 2026-02-04
+
+### WebSocket client with HTMX polling fallback
+The frontend WebSocket client in `market.html` attempts to connect to WebSocket first, but gracefully falls back to HTMX polling if:
+- WebSocket connection fails (network error, browser doesn't support)
+- Connection drops and is in reconnection phase
+
+This hybrid approach ensures the app works in all environments while providing real-time updates when possible.
+
+### Disabling HTMX polling dynamically
+When WebSocket connects, we disable HTMX polling by removing attributes from the DOM:
+```javascript
+function disablePolling() {
+    const positionDiv = document.getElementById('position');
+    if (positionDiv) {
+        positionDiv.removeAttribute('hx-trigger');
+        positionDiv.removeAttribute('hx-get');
+        if (typeof htmx !== 'undefined') {
+            htmx.process(positionDiv); // Re-process to stop polling
+        }
+    }
+}
+```
+
+To re-enable polling (fallback mode), we set the attributes back and call `htmx.process()` again.
+
+### Exponential backoff for reconnection
+WebSocket reconnection uses exponential backoff to avoid hammering the server:
+- Initial delay: 1 second
+- Doubles each attempt: 1s, 2s, 4s, 8s, 16s, 32s, 60s (capped)
+
+The backoff counter resets when connection succeeds, so a brief network blip only costs 1 second of reconnection delay.
+
+### DOMParser for WebSocket HTML updates
+WebSocket sends pre-rendered HTML (same as HTMX partials). The client parses it with `DOMParser`:
+```javascript
+const parser = new DOMParser();
+const doc = parser.parseFromString(html, 'text/html');
+
+const newOrderbook = doc.getElementById('orderbook');
+if (newOrderbook) {
+    document.getElementById('orderbook').innerHTML = newOrderbook.innerHTML;
+}
+```
+
+This approach reuses the existing server-side rendering - no need for separate JSON API or client-side templating.
+
+### JSON messages for control events
+The server sends JSON messages for non-HTML control events like redirects:
+```json
+{"type": "redirect", "url": "/markets/{id}/results"}
+```
+
+The client checks if the message starts with `{` and tries to parse as JSON before treating it as HTML. This allows mixing control messages with HTML updates over the same connection.
+
+### Integration with existing trade feedback
+The trade fill detection (sound + flash) from TODO-032 works with both WebSocket and HTMX:
+- `checkPositionChange()` is called after every DOM update
+- It compares `data-position` attribute before/after
+- The same `playBeep()` and `flashPosition()` functions handle the feedback
+
+This means trade feedback works in both WebSocket mode and fallback polling mode.
+
+### No test changes needed
+This was a frontend-only change - the backend WebSocket API was already built in TODO-034. All 89 existing tests pass since they test the HTTP/REST API and business logic, not the WebSocket functionality.
