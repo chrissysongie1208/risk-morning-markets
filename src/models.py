@@ -23,12 +23,6 @@ class OrderStatus(str, Enum):
     CANCELLED = "CANCELLED"
 
 
-class BinaryResult(str, Enum):
-    WIN = "WIN"
-    LOSS = "LOSS"
-    BREAKEVEN = "BREAKEVEN"
-
-
 # Database models (what we store/retrieve)
 class User(BaseModel):
     id: str
@@ -127,7 +121,6 @@ class PositionWithPnL(BaseModel):
     avg_price: Optional[float] = None
     linear_pnl: Optional[float] = None
     binary_pnl: int = 0  # Lots won (positive) or lost (negative), calculated per-trade
-    binary_result: Optional[BinaryResult] = None
 
 
 class LeaderboardEntry(BaseModel):
@@ -137,9 +130,6 @@ class LeaderboardEntry(BaseModel):
     total_linear_pnl: float
     total_binary_pnl: int = 0  # Total lots won/lost across all markets
     markets_traded: int
-    wins: int
-    losses: int
-    breakevens: int
 
 
 class OrderWithUser(BaseModel):

@@ -37,7 +37,6 @@
                     <th>Avg Price</th>
                     <th>Linear P&L</th>
                     <th>Binary P&L</th>
-                    <th>Result</th>
                 </tr>
             </thead>
             <tbody>
@@ -80,19 +79,6 @@
                             <span class="loss">{{ result.binary_pnl }} lots</span>
                         {% else %}
                             <span>0 lots</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if result.binary_result %}
-                            {% if result.binary_result.value == 'WIN' %}
-                                <span class="win">WIN</span>
-                            {% elif result.binary_result.value == 'LOSS' %}
-                                <span class="loss">LOSS</span>
-                            {% else %}
-                                <span class="breakeven">BREAKEVEN</span>
-                            {% endif %}
-                        {% else %}
-                            -
                         {% endif %}
                     </td>
                 </tr>

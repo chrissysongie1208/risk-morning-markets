@@ -152,3 +152,24 @@ Added 9 new tests to `test_api.py` covering the participant admin flow:
 
 ### Test count increased from 60 to 69
 Total test breakdown: 21 API tests, 6 concurrent tests, 18 matching tests, 24 settlement tests.
+
+---
+
+## Removing Features Cleanly (TODO-023) - 2026-02-04
+
+### Binary result (WIN/LOSS/BREAKEVEN) removed
+The `BinaryResult` enum and `calculate_binary_result()` function were removed because:
+1. Linear P&L already shows who made/lost money
+2. Binary P&L (lots won/lost) provides more nuance than simple WIN/LOSS
+3. The WIN/LOSS label was redundant - if linear_pnl > 0, you won
+
+### Cleanup checklist for feature removal
+When removing a feature, update all these places:
+1. **Templates** (`results.html`, `leaderboard.html`) - remove columns
+2. **Models** (`models.py`) - remove fields from response models
+3. **Business logic** (`settlement.py`) - remove function and usages
+4. **Imports** - remove unused imports (BinaryResult)
+5. **Tests** - remove tests for removed function, update assertions that used the field
+
+### Test count dropped from 69 to 66
+Removed 3 tests for `calculate_binary_result()`. All remaining 66 tests pass.

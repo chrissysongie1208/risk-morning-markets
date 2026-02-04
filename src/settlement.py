@@ -3,7 +3,6 @@
 Implements:
 - Linear P&L calculation: net_quantity * (settlement_value - avg_price)
 - Binary P&L calculation: Per-trade lots won/lost
-- Binary result classification: WIN/LOSS/BREAKEVEN (based on linear P&L)
 - Market settlement process (cancel open orders, calculate results)
 """
 
@@ -11,7 +10,7 @@ from typing import Optional
 
 import database as db
 from models import (
-    Market, Position, Trade, MarketStatus, BinaryResult,
+    Market, Position, Trade, MarketStatus,
     PositionWithPnL, LeaderboardEntry
 )
 
@@ -56,24 +55,6 @@ def calculate_linear_pnl(
 
     # Linear P&L = position * (settlement - avg_price)
     return net_quantity * (settlement_value - avg_price)
-
-
-def calculate_binary_result(linear_pnl: float) -> BinaryResult:
-    """
-    Determine binary result from linear P&L.
-
-    Args:
-        linear_pnl: The linear P&L amount
-
-    Returns:
-        WIN if profit, LOSS if loss, BREAKEVEN if zero
-    """
-    if linear_pnl > 0:
-        return BinaryResult.WIN
-    elif linear_pnl < 0:
-        return BinaryResult.LOSS
-    else:
-        return BinaryResult.BREAKEVEN
 
 
 def calculate_binary_pnl_for_user(
@@ -203,9 +184,6 @@ async def get_market_results(market_id: str) -> list[PositionWithPnL]:
             settlement_value
         )
 
-        # Binary result is based on linear P&L (overall win/loss classification)
-        binary_result = calculate_binary_result(linear_pnl)
-
         # Calculate average price (for display)
         avg_price = None
         if position.net_quantity != 0:
@@ -218,8 +196,7 @@ async def get_market_results(market_id: str) -> list[PositionWithPnL]:
             total_cost=position.total_cost,
             avg_price=avg_price,
             linear_pnl=linear_pnl,
-            binary_pnl=binary_pnl,
-            binary_result=binary_result
+            binary_pnl=binary_pnl
         ))
 
     # Sort by linear P&L descending (winners first)
@@ -256,22 +233,12 @@ async def get_leaderboard() -> list[LeaderboardEntry]:
                     "display_name": result.display_name,
                     "total_linear_pnl": 0.0,
                     "total_binary_pnl": 0,
-                    "markets_traded": 0,
-                    "wins": 0,
-                    "losses": 0,
-                    "breakevens": 0
+                    "markets_traded": 0
                 }
 
             user_totals[user_id]["total_linear_pnl"] += result.linear_pnl or 0
             user_totals[user_id]["total_binary_pnl"] += result.binary_pnl
             user_totals[user_id]["markets_traded"] += 1
-
-            if result.binary_result == BinaryResult.WIN:
-                user_totals[user_id]["wins"] += 1
-            elif result.binary_result == BinaryResult.LOSS:
-                user_totals[user_id]["losses"] += 1
-            else:
-                user_totals[user_id]["breakevens"] += 1
 
     # Convert to LeaderboardEntry objects
     entries = [
@@ -280,10 +247,7 @@ async def get_leaderboard() -> list[LeaderboardEntry]:
             display_name=data["display_name"],
             total_linear_pnl=data["total_linear_pnl"],
             total_binary_pnl=data["total_binary_pnl"],
-            markets_traded=data["markets_traded"],
-            wins=data["wins"],
-            losses=data["losses"],
-            breakevens=data["breakevens"]
+            markets_traded=data["markets_traded"]
         )
         for user_id, data in user_totals.items()
     ]

@@ -44,7 +44,7 @@
 
 - [x] TODO-022: Add tests for anti-spoofing and pre-registered usernames - Unit tests for spoofing prevention logic, integration tests for admin creating participants, tests for dropdown join flow.
 
-- [ ] TODO-023: Remove WIN/LOSS result label - Remove the "Result" column (WIN/LOSS/BREAKEVEN) from results.html and leaderboard.html. Linear P&L and Binary P&L are sufficient. Also remove `calculate_binary_result()` from settlement.py and `binary_result` field from models if no longer needed.
+- [x] TODO-023: Remove WIN/LOSS result label - Remove the "Result" column (WIN/LOSS/BREAKEVEN) from results.html and leaderboard.html. Linear P&L and Binary P&L are sufficient. Also remove `calculate_binary_result()` from settlement.py and `binary_result` field from models if no longer needed.
 
 - [ ] TODO-024: Combine close and settle into single action - Remove separate "Close Market" button/endpoint. Admin just enters settlement value and clicks "Settle" which automatically closes AND settles in one step. Update admin.html, main.py routes, and settlement.py. Remove `/admin/markets/{id}/close` endpoint or have settle call it internally. Market goes directly from OPEN to SETTLED.
 

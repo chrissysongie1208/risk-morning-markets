@@ -4,7 +4,6 @@ Tests cover:
 - Linear P&L for long positions (profit and loss)
 - Linear P&L for short positions (profit and loss)
 - Binary P&L calculation per-trade (lots won/lost)
-- Binary result classification (WIN, LOSS, BREAKEVEN)
 - Settlement cancels open orders
 - Zero position with closed trades (total_cost tracking)
 - Average price calculation with multiple trades
@@ -20,12 +19,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 import database as db
 from settlement import (
     calculate_linear_pnl,
-    calculate_binary_result,
     calculate_binary_pnl_for_user,
     settle_market,
     get_market_results
 )
-from models import OrderSide, OrderStatus, MarketStatus, BinaryResult, Trade
+from models import OrderSide, OrderStatus, MarketStatus, Trade
 from conftest import create_resting_order, set_user_position
 
 
@@ -97,36 +95,6 @@ def test_linear_pnl_short_loss():
     pnl = calculate_linear_pnl(net_quantity, total_cost, settlement_value)
 
     assert pnl == -100.0
-
-
-# ============ Pure function tests for calculate_binary_result ============
-
-def test_binary_win():
-    """
-    Given: User has positive linear P&L
-    Then: Binary result = WIN
-    """
-    assert calculate_binary_result(100.0) == BinaryResult.WIN
-    assert calculate_binary_result(0.01) == BinaryResult.WIN
-    assert calculate_binary_result(1000000.0) == BinaryResult.WIN
-
-
-def test_binary_loss():
-    """
-    Given: User has negative linear P&L
-    Then: Binary result = LOSS
-    """
-    assert calculate_binary_result(-100.0) == BinaryResult.LOSS
-    assert calculate_binary_result(-0.01) == BinaryResult.LOSS
-    assert calculate_binary_result(-1000000.0) == BinaryResult.LOSS
-
-
-def test_binary_breakeven():
-    """
-    Given: User has zero linear P&L
-    Then: Binary result = BREAKEVEN
-    """
-    assert calculate_binary_result(0.0) == BinaryResult.BREAKEVEN
 
 
 # ============ Pure function tests for calculate_binary_pnl_for_user ============
@@ -354,7 +322,6 @@ async def test_zero_position_no_pnl(market, user_alice):
 
     # P&L should be +50 (the profit from the round-trip)
     assert alice_result.linear_pnl == 50.0
-    assert alice_result.binary_result == BinaryResult.WIN
 
 
 @pytest.mark.asyncio
@@ -386,7 +353,6 @@ async def test_average_price_multiple_trades(market, user_alice):
 
     # P&L = 10 * (120 - 105) = 150
     assert alice_result.linear_pnl == 150.0
-    assert alice_result.binary_result == BinaryResult.WIN
 
 
 @pytest.mark.asyncio

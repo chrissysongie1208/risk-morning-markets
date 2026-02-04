@@ -20,9 +20,6 @@
                 <th>Linear P&L</th>
                 <th>Binary P&L</th>
                 <th>Markets</th>
-                <th>Wins</th>
-                <th>Losses</th>
-                <th>Win Rate</th>
             </tr>
         </thead>
         <tbody>
@@ -49,16 +46,6 @@
                     {% if entry.total_binary_pnl >= 0 %}+{% endif %}{{ entry.total_binary_pnl }} lots
                 </td>
                 <td>{{ entry.markets_traded }}</td>
-                <td class="win">{{ entry.wins }}</td>
-                <td class="loss">{{ entry.losses }}</td>
-                <td>
-                    {% set total_decided = entry.wins + entry.losses %}
-                    {% if total_decided > 0 %}
-                        {{ "%.0f"|format(entry.wins / total_decided * 100) }}%
-                    {% else %}
-                        -
-                    {% endif %}
-                </td>
             </tr>
             {% endfor %}
         </tbody>

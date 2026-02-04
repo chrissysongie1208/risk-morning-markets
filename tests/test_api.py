@@ -686,7 +686,7 @@ async def test_full_trade_lifecycle():
     assert result_b is not None
 
     assert result_a.linear_pnl == -50.0
-    assert result_a.binary_result == "LOSS"
+    assert result_a.binary_pnl == -5  # Sold 5 lots below settlement = lost 5 lots
 
     assert result_b.linear_pnl == 50.0
-    assert result_b.binary_result == "WIN"
+    assert result_b.binary_pnl == 5  # Bought 5 lots below settlement = won 5 lots
