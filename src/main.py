@@ -712,6 +712,93 @@ async def market_results(
 
 # ============ HTMX Partial Routes ============
 
+@app.get("/partials/market/{market_id}", response_class=HTMLResponse)
+async def partial_market_all(
+    request: Request,
+    market_id: str,
+    session: Optional[str] = Cookie(None)
+):
+    """HTMX partial: Combined position, orderbook, and trades for a market.
+
+    Returns all three sections in one response using hx-swap-oob.
+    This reduces HTTP requests from 3/sec to 1/sec per user.
+    """
+    user = await auth.get_current_user(session)
+    if not user:
+        return HTMLResponse(content="<p>Session expired. Please refresh.</p>")
+
+    market = await db.get_market(market_id)
+    if not market:
+        return HTMLResponse(content="<p>Market not found.</p>")
+
+    # Get order book (all open orders)
+    bids = await db.get_open_orders(market_id, side=OrderSide.BID)
+    offers = await db.get_open_orders(market_id, side=OrderSide.OFFER)
+
+    # Enrich orders with user display names
+    bids_with_users = []
+    for order in bids:
+        order_user = await db.get_user_by_id(order.user_id)
+        bids_with_users.append(OrderWithUser(
+            id=order.id,
+            user_id=order.user_id,
+            display_name=order_user.display_name if order_user else "Unknown",
+            side=order.side,
+            price=order.price,
+            quantity=order.quantity,
+            remaining_quantity=order.remaining_quantity,
+            status=order.status,
+            created_at=order.created_at
+        ))
+
+    offers_with_users = []
+    for order in offers:
+        order_user = await db.get_user_by_id(order.user_id)
+        offers_with_users.append(OrderWithUser(
+            id=order.id,
+            user_id=order.user_id,
+            display_name=order_user.display_name if order_user else "Unknown",
+            side=order.side,
+            price=order.price,
+            quantity=order.quantity,
+            remaining_quantity=order.remaining_quantity,
+            status=order.status,
+            created_at=order.created_at
+        ))
+
+    # Get recent trades with user names
+    recent_trades = await db.get_recent_trades(market_id, limit=10)
+    trades_with_users = []
+    for trade in recent_trades:
+        buyer = await db.get_user_by_id(trade.buyer_id)
+        seller = await db.get_user_by_id(trade.seller_id)
+        trades_with_users.append(TradeWithUsers(
+            id=trade.id,
+            buyer_name=buyer.display_name if buyer else "Unknown",
+            seller_name=seller.display_name if seller else "Unknown",
+            price=trade.price,
+            quantity=trade.quantity,
+            created_at=trade.created_at
+        ))
+
+    # Get user's position
+    position = await db.get_position(market_id, user.id)
+
+    return templates.TemplateResponse(
+        "partials/market_all.html",
+        {
+            "request": request,
+            "user": user,
+            "market": market,
+            "bids": bids_with_users,
+            "offers": offers_with_users,
+            "trades": trades_with_users,
+            "position": position
+        }
+    )
+
+
+# Deprecated: Individual partial endpoints kept for backward compatibility
 @app.get("/partials/orderbook/{market_id}", response_class=HTMLResponse)
 async def partial_orderbook(
     request: Request,

@@ -2,6 +2,31 @@
 
 Key learnings from building this app. Read before starting work.
 
+> **Note**: This file is cumulative across iterations. See `archive/iteration-N/` for historical TODO.md, PROJECT_CONTEXT.md, and QUESTIONS.md from each iteration.
+
+---
+
+## Iteration 1 (Feb 3-4): Initial Build
+
+Built the complete prediction market app from scratch:
+- SQLite → PostgreSQL migration
+- Matching engine with price-time priority
+- P&L calculation (linear + binary)
+- HTMX real-time updates
+- Deployed to Render + Neon
+
+**43 detailed lessons documented** - see `archive/iteration-1/LESSONS.md` for the full sequential record.
+
+Key highlights:
+- LESSON-031: Create orders before trades for FK constraints in PostgreSQL
+- LESSON-036: Race conditions without database locking (acceptable for 20 users)
+- LESSON-041: Cloud deployment requires human interaction - mark blocked
+- LESSON-043: Git credential conflicts - embed username in remote URL
+
+---
+
+## Iteration 2 (Feb 4+): Feature Updates
+
 ---
 
 ## Database & PostgreSQL
@@ -197,3 +222,34 @@ Rather than creating a new combined endpoint, the existing infrastructure alread
 
 ### Test count increased to 67
 Added `test_settle_open_market_cancels_orders` to verify OPEN markets can be settled directly and open orders are cancelled.
+
+---
+
+## HTMX OOB Swaps for Combined Updates (TODO-025) - 2026-02-04
+
+### Reducing HTTP requests with hx-swap-oob
+HTMX's Out-of-Band (OOB) swap feature allows a single response to update multiple DOM elements. Instead of 3 separate polling endpoints (position, orderbook, trades), we now use one combined endpoint that returns all sections.
+
+**How it works:**
+1. The position div is the "primary target" with `hx-get="/partials/market/{id}"` and `hx-trigger="every 1s"`
+2. The response includes orderbook and trades divs with `hx-swap-oob="innerHTML"` attribute
+3. HTMX recognizes these OOB elements and swaps them into their target locations by ID
+
+**Template structure:**
+```html
+{# Primary content - goes to hx-target #}
+<div id="position-content">...</div>
+
+{# OOB swaps - automatically placed by ID #}
+<div id="orderbook" hx-swap-oob="innerHTML">...</div>
+<div id="trades" hx-swap-oob="innerHTML">...</div>
+```
+
+### Key insight: nesting wrapper div
+The primary target div needs a wrapper to work correctly:
+- `market.html` has `<div id="position" hx-target="#position-content">` containing `<div id="position-content">`
+- The response replaces the inner `position-content` div
+- This prevents the polling attributes from being overwritten
+
+### Backward compatibility
+Old endpoints (`/partials/orderbook`, `/partials/position`, `/partials/trades`) are kept but marked deprecated. This allows gradual migration if any external tools depend on them.

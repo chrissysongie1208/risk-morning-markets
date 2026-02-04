@@ -48,5 +48,21 @@
 
 - [x] TODO-024: Combine close and settle into single action - Remove separate "Close Market" button/endpoint. Admin just enters settlement value and clicks "Settle" which automatically closes AND settles in one step. Update admin.html, main.py routes, and settlement.py. Remove `/admin/markets/{id}/close` endpoint or have settle call it internally. Market goes directly from OPEN to SETTLED.
 
+---
+
+## Phase 3: Performance & UX Improvements
+
+- [x] TODO-025: Combine HTMX partials into single endpoint - Create `/partials/market/{id}` that returns position, orderbook, and trades in one response. Update market.html to poll this single endpoint instead of 3 separate endpoints. Use HTMX `hx-swap-oob` or wrap sections in target divs. This reduces HTTP requests from 3/sec to 1/sec per user, reducing load on Render/Neon free tiers. Keep old endpoints for backward compatibility but mark deprecated.
+
+- [ ] TODO-026: Add settle button to market page for admin - When admin views a market page and market is OPEN, show a "Settle Market" form directly on the page (not just in Admin panel). Form has settlement value input and submit button. Non-admin users don't see this form. This lets admin settle without navigating away from the market view.
+
+- [ ] TODO-027: Auto-redirect to results when market settles - When market is SETTLED and user is on the market page, automatically redirect to results page. Implement via: (a) HTMX partial returns a redirect header/meta refresh when market.status == SETTLED, or (b) Add market status to partial response and use HTMX `hx-trigger` with custom event, or (c) Simple JS check on partial response. Choose simplest approach that works.
+
+- [ ] TODO-028: Add tests for combined partial endpoint - Test that single endpoint returns all 3 sections. Test that old endpoints still work (backward compat). Test performance improvement is measurable.
+
+- [ ] TODO-029: Add tests for admin settle on market page and auto-redirect - Test admin sees settle form, non-admin doesn't. Test settle from market page works. Test auto-redirect fires when market settles.
+
+- [ ] TODO-030: Prevent duplicate participant login (session exclusivity) - If a participant is claimed AND has an active session, reject new login attempts with "Participant already in use". Track `last_activity` timestamp per user, updated on each HTMX poll or page load. Define "active" as last_activity within 30 seconds (configurable). When user tries to join a claimed participant, check if claimed user's last_activity is recent. If yes, reject. If stale (>30s), allow takeover (auto-releases old session). Add test cases for: active user blocks new login, stale session allows takeover.
+
 <!-- Add new TODOs here with sequential IDs -->
 

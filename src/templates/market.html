@@ -56,35 +56,32 @@
     <p><em>This market has been settled. <a href="/markets/{{ market.id }}/results">View Results</a></em></p>
     {% endif %}
 
-    <!-- Current Position (HTMX polling every 1 second) -->
+    <!-- Current Position (HTMX polling - triggers combined update) -->
     <section>
         <h3>Your Position</h3>
         <div id="position"
-             hx-get="/partials/position/{{ market.id }}"
+             hx-get="/partials/market/{{ market.id }}"
              hx-trigger="every 1s"
-             hx-swap="innerHTML">
+             hx-swap="innerHTML"
+             hx-target="#position-content">
+            <div id="position-content">
             {% include 'partials/position.html' %}
+            </div>
         </div>
     </section>
 
-    <!-- Order Book (HTMX polling every 1 second) -->
+    <!-- Order Book (updated via hx-swap-oob from combined endpoint) -->
     <section>
         <h3>Order Book</h3>
-        <div id="orderbook"
-             hx-get="/partials/orderbook/{{ market.id }}"
-             hx-trigger="every 1s"
-             hx-swap="innerHTML">
+        <div id="orderbook">
             {% include 'partials/orderbook.html' %}
         </div>
     </section>
 
-    <!-- Recent Trades (HTMX polling every 1 second) -->
+    <!-- Recent Trades (updated via hx-swap-oob from combined endpoint) -->
     <section>
         <h3>Recent Trades</h3>
-        <div id="trades"
-             hx-get="/partials/trades/{{ market.id }}"
-             hx-trigger="every 1s"
-             hx-swap="innerHTML">
+        <div id="trades">
             {% include 'partials/trades.html' %}
         </div>
     </section>
