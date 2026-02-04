@@ -42,7 +42,7 @@
 
 - [x] TODO-021: Pre-registered usernames - Admin can create participant usernames in advance. Add `participants` table (id, display_name, created_by_admin, created_at). Admin panel gets new section to add/remove participant names. Join page changes from free-text input to dropdown of available names. When user selects a name, they "claim" it for that session (still no password). Historical data (positions, trades) stays linked to the participant record across sessions.
 
-- [ ] TODO-022: Add tests for anti-spoofing and pre-registered usernames - Unit tests for spoofing prevention logic, integration tests for admin creating participants, tests for dropdown join flow.
+- [x] TODO-022: Add tests for anti-spoofing and pre-registered usernames - Unit tests for spoofing prevention logic, integration tests for admin creating participants, tests for dropdown join flow.
 
 - [ ] TODO-023: Remove WIN/LOSS result label - Remove the "Result" column (WIN/LOSS/BREAKEVEN) from results.html and leaderboard.html. Linear P&L and Binary P&L are sufficient. Also remove `calculate_binary_result()` from settlement.py and `binary_result` field from models if no longer needed.
 

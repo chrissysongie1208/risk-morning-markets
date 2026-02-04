@@ -126,3 +126,29 @@ When changing the join API, ALL tests that use `/join` must be updated. This inc
 - Any fixture that creates a "participant_client"
 
 Create a helper function `create_participant_and_get_id(name)` to streamline test setup.
+
+---
+
+## Test Coverage for New Features (TODO-022) - 2026-02-04
+
+### Anti-spoofing tests already existed
+The anti-spoofing tests were added as part of TODO-020 in `test_matching.py`. They cover:
+- Bid crossing own offer at same/lower price
+- Offer crossing own bid at same/higher price
+- Valid non-crossing orders are accepted
+- Spoofing check only affects user's own orders
+
+### Pre-registered participants integration tests
+Added 9 new tests to `test_api.py` covering the participant admin flow:
+- Join with invalid/non-existent participant ID returns error
+- Join with whitespace-only ID returns error (after strip)
+- Admin can create participants
+- Admin cannot create duplicate participants
+- Admin can delete unclaimed participants
+- Admin cannot delete claimed participants
+- Admin can release claimed participants
+- Only unclaimed participants appear in available list
+- Non-admin cannot create participants (403)
+
+### Test count increased from 60 to 69
+Total test breakdown: 21 API tests, 6 concurrent tests, 18 matching tests, 24 settlement tests.

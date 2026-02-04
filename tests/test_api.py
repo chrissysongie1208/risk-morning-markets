@@ -113,6 +113,199 @@ async def test_join_already_claimed_allows_rejoin(client):
         assert response2.headers["location"] == "/markets"
 
 
+# ============ Pre-registered Participants Tests ============
+
+@pytest.mark.asyncio
+async def test_join_invalid_participant_id(client):
+    """POST /join with non-existent participant ID -> redirect with error"""
+    response = await client.post(
+        "/join",
+        data={"participant_id": "non-existent-uuid-12345"},
+        follow_redirects=False
+    )
+
+    # Should redirect to / with error
+    assert response.status_code == 303
+    assert "error=" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_join_empty_participant_id(client):
+    """POST /join with empty participant_id -> rejected"""
+    response = await client.post(
+        "/join",
+        data={"participant_id": "   "},  # Whitespace-only
+        follow_redirects=False
+    )
+
+    # With whitespace the form validates, but our handler strips and rejects
+    assert response.status_code == 303
+    assert "error=" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_admin_create_participant(admin_client):
+    """POST /admin/participants as admin -> participant created"""
+    response = await admin_client.post(
+        "/admin/participants",
+        data={"display_name": "NewParticipant"},
+        follow_redirects=False
+    )
+
+    # Should redirect to /admin with success message
+    assert response.status_code == 303
+    assert "/admin" in response.headers["location"]
+    assert "success=" in response.headers["location"]
+
+    # Verify participant was created
+    participant = await db.get_participant_by_name("NewParticipant")
+    assert participant is not None
+    assert participant.claimed_by_user_id is None
+
+
+@pytest.mark.asyncio
+async def test_admin_create_duplicate_participant(admin_client):
+    """POST /admin/participants with duplicate name -> redirect with error"""
+    # Create first participant
+    await admin_client.post(
+        "/admin/participants",
+        data={"display_name": "DuplicateName"},
+        follow_redirects=True
+    )
+
+    # Try to create duplicate
+    response = await admin_client.post(
+        "/admin/participants",
+        data={"display_name": "DuplicateName"},
+        follow_redirects=False
+    )
+
+    # Should redirect with error
+    assert response.status_code == 303
+    assert "error=" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_admin_delete_unclaimed_participant(admin_client):
+    """POST /admin/participants/{id}/delete on unclaimed -> success"""
+    # Create participant
+    participant_id = await create_participant_and_get_id("ToDelete")
+
+    # Delete it
+    response = await admin_client.post(
+        f"/admin/participants/{participant_id}/delete",
+        follow_redirects=False
+    )
+
+    # Should redirect with success
+    assert response.status_code == 303
+    assert "success=" in response.headers["location"]
+    assert "deleted" in response.headers["location"].lower()
+
+    # Verify participant was deleted
+    participant = await db.get_participant_by_id(participant_id)
+    assert participant is None
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_delete_claimed_participant(admin_client):
+    """POST /admin/participants/{id}/delete on claimed -> error"""
+    # Create and claim participant
+    participant_id = await create_participant_and_get_id("ClaimedToDelete")
+
+    # Have someone claim it via join
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as joiner:
+        await joiner.post(
+            "/join",
+            data={"participant_id": participant_id},
+            follow_redirects=False
+        )
+
+    # Try to delete claimed participant
+    response = await admin_client.post(
+        f"/admin/participants/{participant_id}/delete",
+        follow_redirects=False
+    )
+
+    # Should redirect with error
+    assert response.status_code == 303
+    assert "error=" in response.headers["location"]
+
+
+@pytest.mark.asyncio
+async def test_admin_release_claimed_participant(admin_client):
+    """POST /admin/participants/{id}/release on claimed -> success"""
+    # Create and claim participant
+    participant_id = await create_participant_and_get_id("ClaimedToRelease")
+
+    # Have someone claim it
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as joiner:
+        await joiner.post(
+            "/join",
+            data={"participant_id": participant_id},
+            follow_redirects=False
+        )
+
+    # Verify it's claimed
+    participant = await db.get_participant_by_id(participant_id)
+    assert participant.claimed_by_user_id is not None
+
+    # Release it
+    response = await admin_client.post(
+        f"/admin/participants/{participant_id}/release",
+        follow_redirects=False
+    )
+
+    # Should redirect with success
+    assert response.status_code == 303
+    assert "success=" in response.headers["location"]
+    assert "released" in response.headers["location"].lower()
+
+    # Verify participant is unclaimed
+    participant = await db.get_participant_by_id(participant_id)
+    assert participant.claimed_by_user_id is None
+
+
+@pytest.mark.asyncio
+async def test_only_unclaimed_participants_in_dropdown():
+    """GET / should show only unclaimed participants in dropdown"""
+    transport = ASGITransport(app=app)
+
+    # Create two participants
+    participant1_id = await create_participant_and_get_id("AvailableParticipant")
+    participant2_id = await create_participant_and_get_id("ClaimedParticipant")
+
+    # Claim one participant
+    async with AsyncClient(transport=transport, base_url="http://test") as claimer:
+        await claimer.post(
+            "/join",
+            data={"participant_id": participant2_id},
+            follow_redirects=False
+        )
+
+    # Now check available participants
+    available = await db.get_available_participants()
+    available_names = [p.display_name for p in available]
+
+    assert "AvailableParticipant" in available_names
+    assert "ClaimedParticipant" not in available_names
+
+
+@pytest.mark.asyncio
+async def test_participant_create_as_non_admin_rejected(participant_client):
+    """POST /admin/participants as non-admin -> 403"""
+    response = await participant_client.post(
+        "/admin/participants",
+        data={"display_name": "ShouldNotExist"},
+        follow_redirects=False
+    )
+
+    # Should return 403 Forbidden
+    assert response.status_code == 403
+
+
 # ============ Admin Auth Tests ============
 
 @pytest.mark.asyncio
