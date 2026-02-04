@@ -83,7 +83,8 @@ def verify_admin_credentials(username: str, password: str) -> bool:
 
 
 # Session exclusivity timeout in seconds
-SESSION_ACTIVITY_TIMEOUT = 30
+# Longer timeout (120s) gives users more buffer for browser refreshes or brief interruptions
+SESSION_ACTIVITY_TIMEOUT = 120
 
 
 async def login_participant(participant_id: str) -> tuple[User, str]:

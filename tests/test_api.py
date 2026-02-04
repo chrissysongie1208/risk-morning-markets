@@ -1219,8 +1219,9 @@ async def test_active_session_blocks_new_login():
 
 @pytest.mark.asyncio
 async def test_stale_session_allows_takeover():
-    """If participant is claimed but user is inactive (>30s), allow takeover."""
+    """If participant is claimed but user is inactive (>SESSION_ACTIVITY_TIMEOUT), allow takeover."""
     from datetime import datetime, timedelta
+    from auth import SESSION_ACTIVITY_TIMEOUT
 
     transport = ASGITransport(app=app)
 
@@ -1237,12 +1238,12 @@ async def test_stale_session_allows_takeover():
         assert response1.status_code == 303
         assert response1.headers["location"] == "/markets"
 
-    # Manually set the last_activity to > 30 seconds ago to simulate stale session
+    # Manually set the last_activity to beyond the timeout to simulate stale session
     participant = await db.get_participant_by_id(participant_id)
     assert participant is not None
     assert participant.claimed_by_user_id is not None
 
-    stale_time = (datetime.utcnow() - timedelta(seconds=60)).isoformat()
+    stale_time = (datetime.utcnow() - timedelta(seconds=SESSION_ACTIVITY_TIMEOUT + 30)).isoformat()
     await db.database.execute(
         "UPDATE users SET last_activity = :stale WHERE id = :id",
         {"stale": stale_time, "id": participant.claimed_by_user_id}
@@ -1374,6 +1375,7 @@ async def test_unclaimed_participant_no_active_check():
 async def test_stale_participants_auto_unclaim_on_index():
     """GET / cleans up stale participants before showing available list."""
     from datetime import datetime, timedelta
+    from auth import SESSION_ACTIVITY_TIMEOUT
 
     transport = ASGITransport(app=app)
 
@@ -1394,8 +1396,8 @@ async def test_stale_participants_auto_unclaim_on_index():
     assert participant is not None
     assert participant.claimed_by_user_id is not None
 
-    # Make the user's session stale (> 30 seconds old)
-    stale_time = (datetime.utcnow() - timedelta(seconds=60)).isoformat()
+    # Make the user's session stale (beyond SESSION_ACTIVITY_TIMEOUT)
+    stale_time = (datetime.utcnow() - timedelta(seconds=SESSION_ACTIVITY_TIMEOUT + 30)).isoformat()
     await db.database.execute(
         "UPDATE users SET last_activity = :stale WHERE id = :id",
         {"stale": stale_time, "id": participant.claimed_by_user_id}

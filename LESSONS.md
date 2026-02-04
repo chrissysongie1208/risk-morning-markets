@@ -507,3 +507,40 @@ Even deprecated templates should stay consistent for backward compatibility.
 
 ### No test changes needed
 This was a pure frontend/CSS change - no backend logic affected, so all 89 existing tests continue to pass.
+
+---
+
+## Configurable Timeout and Polling (TODO-033) - 2026-02-04
+
+### Changing config values requires updating related tests
+When changing a configurable value like `SESSION_ACTIVITY_TIMEOUT` from 30 to 120 seconds, tests that depend on that value may fail. Tests that used hardcoded "stale" times (e.g., 60 seconds ago) need to be updated to use the actual timeout constant:
+
+```python
+# Before - hardcoded 60 seconds
+stale_time = (datetime.utcnow() - timedelta(seconds=60)).isoformat()
+
+# After - dynamically based on config
+from auth import SESSION_ACTIVITY_TIMEOUT
+stale_time = (datetime.utcnow() - timedelta(seconds=SESSION_ACTIVITY_TIMEOUT + 30)).isoformat()
+```
+
+This makes tests resilient to future timeout changes.
+
+### HTMX polling interval affects UI responsiveness
+Changing polling from 1000ms to 500ms doubles the HTTP request rate but makes the UI feel more responsive:
+- Orderbook updates appear faster
+- Trade fills show within 0.5s instead of 1s
+- Position changes are more immediate
+
+For a small-scale app (< 30 users), the increased request rate is acceptable. For larger scale, WebSockets (TODO-034) would be better.
+
+### Session timeout tradeoffs
+The 30-second timeout was too aggressive for real users:
+- Browser refreshes could log them out
+- Brief network issues would cause "already in use" errors
+- Users stepping away briefly would lose their session
+
+120 seconds provides a better balance:
+- Still cleans up stale sessions between games (2 min)
+- Tolerates typical user interruptions
+- Doesn't block other users unnecessarily long
