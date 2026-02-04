@@ -60,7 +60,7 @@
 
 - [x] TODO-028: Add tests for combined partial endpoint - Test that single endpoint returns all 3 sections. Test that old endpoints still work (backward compat). Test performance improvement is measurable.
 
-- [ ] TODO-029: Add tests for admin settle on market page and auto-redirect - Test admin sees settle form, non-admin doesn't. Test settle from market page works. Test auto-redirect fires when market settles.
+- [x] TODO-029: Add tests for admin settle on market page and auto-redirect - Test admin sees settle form, non-admin doesn't. Test settle from market page works. Test auto-redirect fires when market settles.
 
 - [ ] TODO-030: Prevent duplicate participant login (session exclusivity) - If a participant is claimed AND has an active session, reject new login attempts with "Participant already in use". Track `last_activity` timestamp per user, updated on each HTMX poll or page load. Define "active" as last_activity within 30 seconds (configurable). When user tries to join a claimed participant, check if claimed user's last_activity is recent. If yes, reject. If stale (>30s), allow takeover (auto-releases old session). Add test cases for: active user blocks new login, stale session allows takeover.
 

@@ -324,3 +324,43 @@ When deprecating but keeping old endpoints:
 Added 7 new tests covering combined partial endpoint and backward compatibility:
 - 4 tests for combined `/partials/market/{id}` endpoint
 - 3 tests for deprecated individual partial endpoints (orderbook, position, trades)
+
+---
+
+## Testing Admin UI Features (TODO-029) - 2026-02-04
+
+### Testing template conditionals
+When testing that a template shows or hides elements based on user role:
+1. Check for specific text that only appears in that element (e.g., "Admin: Settle Market")
+2. Check for action URLs that are unique to that form
+3. Also verify that something else IS visible (sanity check the page loaded correctly)
+
+Example assertions:
+```python
+# Admin should see the form
+assert "Admin: Settle Market" in content
+assert 'action="/admin/markets/' in content
+
+# Non-admin should NOT see the form
+assert "Admin: Settle Market" not in content
+# But should see the market itself
+assert "Test market question" in content
+```
+
+### Testing HX-Redirect headers
+HTMX uses the `HX-Redirect` response header to trigger client-side redirects. Test this by:
+1. Setting up the state that triggers the redirect (e.g., settled market)
+2. Making a request to the HTMX endpoint
+3. Checking that `"HX-Redirect" in response.headers`
+4. Verifying the redirect URL is correct
+
+Note: The response status code is still 200 (not 302/303) - the redirect is handled client-side by HTMX.
+
+### Test count increased from 74 to 80
+Added 6 new tests covering admin settle form visibility and auto-redirect:
+- `test_admin_sees_settle_form_on_market_page` - Admin on OPEN market sees settle form
+- `test_non_admin_does_not_see_settle_form` - Participant doesn't see admin form
+- `test_admin_settle_form_not_shown_on_settled_market` - Form hidden after settlement
+- `test_settle_from_market_page_works` - Settle POST from market page succeeds
+- `test_auto_redirect_on_settled_market` - HX-Redirect header on settled market
+- `test_no_redirect_on_open_market` - No redirect header for open markets

@@ -947,3 +947,213 @@ async def test_deprecated_trades_partial_still_works(admin_client):
     assert response.status_code == 200
     # Should show "No trades yet" since we haven't traded
     assert "No trades" in response.text or "trades" in response.text.lower()
+
+
+# ============ Admin Settle on Market Page Tests (TODO-029) ============
+
+@pytest.mark.asyncio
+async def test_admin_sees_settle_form_on_market_page(admin_client):
+    """GET /markets/{id} as admin on OPEN market shows settle form."""
+    # Create a market
+    await admin_client.post(
+        "/admin/markets",
+        data={"question": "Admin settle form visibility test?"},
+        follow_redirects=True
+    )
+
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "Admin settle form visibility test" in m.question), None)
+    assert market is not None
+    assert market.status.value == "OPEN"
+
+    # View the market page as admin
+    response = await admin_client.get(f"/markets/{market.id}")
+
+    assert response.status_code == 200
+    content = response.text
+
+    # Should show the admin settle form
+    assert "Admin: Settle Market" in content
+    assert 'action="/admin/markets/' in content
+    assert "/settle" in content
+    assert "Settlement Value" in content
+
+
+@pytest.mark.asyncio
+async def test_non_admin_does_not_see_settle_form(participant_client):
+    """GET /markets/{id} as non-admin does not show settle form."""
+    # First create a market as admin
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as admin_cl:
+        await admin_cl.post(
+            "/admin/login",
+            data={"username": "chrson", "password": "optiver"},
+            follow_redirects=False
+        )
+        await admin_cl.post(
+            "/admin/markets",
+            data={"question": "Non-admin no settle form test?"},
+            follow_redirects=True
+        )
+
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "Non-admin no settle form test" in m.question), None)
+    assert market is not None
+
+    # View the market page as regular participant
+    response = await participant_client.get(f"/markets/{market.id}")
+
+    assert response.status_code == 200
+    content = response.text
+
+    # Should NOT show the admin settle form
+    assert "Admin: Settle Market" not in content
+    # But should still show the market question (sanity check)
+    assert "Non-admin no settle form test" in content
+
+
+@pytest.mark.asyncio
+async def test_admin_settle_form_not_shown_on_settled_market(admin_client):
+    """GET /markets/{id} on SETTLED market does not show settle form."""
+    # Create and settle a market
+    await admin_client.post(
+        "/admin/markets",
+        data={"question": "Settled no form test?"},
+        follow_redirects=True
+    )
+
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "Settled no form test" in m.question), None)
+    assert market is not None
+
+    # Settle the market
+    await admin_client.post(
+        f"/admin/markets/{market.id}/settle",
+        data={"settlement_value": "100"},
+        follow_redirects=True
+    )
+
+    # View the market page as admin
+    response = await admin_client.get(f"/markets/{market.id}")
+
+    assert response.status_code == 200
+    content = response.text
+
+    # Should NOT show the settle form (market is already settled)
+    assert "Admin: Settle Market" not in content
+    # Should show link to results instead
+    assert "View Results" in content
+
+
+@pytest.mark.asyncio
+async def test_settle_from_market_page_works(admin_client):
+    """POST /admin/markets/{id}/settle from market page successfully settles."""
+    # Create a market
+    await admin_client.post(
+        "/admin/markets",
+        data={"question": "Settle from market page test?"},
+        follow_redirects=True
+    )
+
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "Settle from market page test" in m.question), None)
+    assert market is not None
+    assert market.status.value == "OPEN"
+
+    # Place some orders
+    await admin_client.post(
+        f"/markets/{market.id}/orders",
+        data={"side": "BID", "price": "95", "quantity": "3"},
+        follow_redirects=True
+    )
+
+    # Settle directly from market page (same endpoint as admin panel)
+    response = await admin_client.post(
+        f"/admin/markets/{market.id}/settle",
+        data={"settlement_value": "100"},
+        follow_redirects=False
+    )
+
+    # Should redirect to results page
+    assert response.status_code == 303
+    assert f"/markets/{market.id}/results" in response.headers["location"]
+
+    # Verify market is settled
+    updated_market = await db.get_market(market.id)
+    assert updated_market.status.value == "SETTLED"
+    assert updated_market.settlement_value == 100.0
+
+
+# ============ Auto-redirect Tests (TODO-029) ============
+
+@pytest.mark.asyncio
+async def test_auto_redirect_on_settled_market():
+    """HTMX partial returns HX-Redirect when viewing settled market."""
+    transport = ASGITransport(app=app)
+
+    # Create and settle market as admin
+    async with AsyncClient(transport=transport, base_url="http://test") as admin_cl:
+        await admin_cl.post(
+            "/admin/login",
+            data={"username": "chrson", "password": "optiver"},
+            follow_redirects=False
+        )
+
+        await admin_cl.post(
+            "/admin/markets",
+            data={"question": "Auto-redirect test market?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = next((m for m in markets if "Auto-redirect test market" in m.question), None)
+        assert market is not None
+
+        # Settle the market
+        await admin_cl.post(
+            f"/admin/markets/{market.id}/settle",
+            data={"settlement_value": "100"},
+            follow_redirects=True
+        )
+
+    # Now as a participant, request the combined partial
+    participant_id = await create_participant_and_get_id("AutoRedirectUser")
+    async with AsyncClient(transport=transport, base_url="http://test") as user_cl:
+        await user_cl.post(
+            "/join",
+            data={"participant_id": participant_id},
+            follow_redirects=False
+        )
+
+        # Request the combined partial endpoint (as if HTMX polling)
+        response = await user_cl.get(f"/partials/market/{market.id}")
+
+        # Should return HX-Redirect header
+        assert response.status_code == 200
+        assert "HX-Redirect" in response.headers
+        assert f"/markets/{market.id}/results" in response.headers["HX-Redirect"]
+
+
+@pytest.mark.asyncio
+async def test_no_redirect_on_open_market(admin_client):
+    """HTMX partial does NOT return HX-Redirect for open market."""
+    # Create a market (stays OPEN)
+    await admin_client.post(
+        "/admin/markets",
+        data={"question": "No redirect open market test?"},
+        follow_redirects=True
+    )
+
+    markets = await db.get_all_markets()
+    market = next((m for m in markets if "No redirect open market test" in m.question), None)
+    assert market is not None
+    assert market.status.value == "OPEN"
+
+    # Request the combined partial
+    response = await admin_client.get(f"/partials/market/{market.id}")
+
+    # Should NOT have HX-Redirect header
+    assert response.status_code == 200
+    assert "HX-Redirect" not in response.headers
+    # Should contain the position content
+    assert 'id="position-content"' in response.text
