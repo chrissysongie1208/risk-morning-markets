@@ -23,6 +23,11 @@ class MarketNotOpen(Exception):
     pass
 
 
+class SpoofingRejected(Exception):
+    """Raised when an order would cross the user's own resting orders."""
+    pass
+
+
 @dataclass
 class MatchResult:
     """Result of attempting to place an order."""
@@ -31,6 +36,43 @@ class MatchResult:
     fully_filled: bool      # True if entire order quantity was filled
     rejected: bool          # True if order was rejected (e.g., position limit)
     reject_reason: Optional[str] = None
+
+
+async def check_spoofing(
+    market_id: str,
+    user_id: str,
+    side: OrderSide,
+    price: float
+) -> tuple[bool, str]:
+    """
+    Check if placing an order would cross the user's own resting orders (spoofing).
+
+    Anti-spoofing rules:
+    - BID at price P: reject if user has any OFFER at price <= P
+    - OFFER at price P: reject if user has any BID at price >= P
+
+    This prevents users from manipulating the market by placing orders on both
+    sides that would immediately cross if placed by different users.
+
+    Returns:
+        Tuple of (allowed: bool, reason: str if rejected)
+    """
+    if side == OrderSide.BID:
+        # Check if user has any offers at or below this bid price
+        user_offers = await db.get_open_orders(market_id, side=OrderSide.OFFER)
+        user_offers = [o for o in user_offers if o.user_id == user_id and o.price <= price]
+        if user_offers:
+            best_offer = min(o.price for o in user_offers)
+            return False, f"Cannot bid at {price} when you have an offer at {best_offer}"
+    else:
+        # Check if user has any bids at or above this offer price
+        user_bids = await db.get_open_orders(market_id, side=OrderSide.BID)
+        user_bids = [o for o in user_bids if o.user_id == user_id and o.price >= price]
+        if user_bids:
+            best_bid = max(o.price for o in user_bids)
+            return False, f"Cannot offer at {price} when you have a bid at {best_bid}"
+
+    return True, ""
 
 
 async def check_position_limit(
@@ -126,10 +168,21 @@ async def place_order(
             reject_reason=reject_reason
         )
 
-    # 4. Get current position for tracking during matching
+    # 4. Check for spoofing (order crossing user's own orders)
+    allowed, reject_reason = await check_spoofing(market_id, user_id, side, price)
+    if not allowed:
+        return MatchResult(
+            order=None,
+            trades=[],
+            fully_filled=False,
+            rejected=True,
+            reject_reason=reject_reason
+        )
+
+    # 5. Get current position for tracking during matching
     position = await db.get_position(market_id, user_id)
 
-    # 5. Get matching orders from the book (excluding self)
+    # 6. Get matching orders from the book (excluding self)
     if side == OrderSide.BID:
         # Looking for offers at or below my bid price
         counter_orders = await db.get_open_orders(
@@ -149,7 +202,7 @@ async def place_order(
         # Filter to only bids at or above our offer price
         counter_orders = [o for o in counter_orders if o.price >= price]
 
-    # 6. Create the incoming order first (needed for trade foreign key constraints)
+    # 7. Create the incoming order first (needed for trade foreign key constraints)
     # This order will track its remaining quantity as matches happen
     incoming_order = await db.create_order(
         market_id=market_id,
@@ -159,7 +212,7 @@ async def place_order(
         quantity=quantity
     )
 
-    # 7. Match against counter orders
+    # 8. Match against counter orders
     remaining_quantity = quantity
     trades = []
     current_position = position.net_quantity
@@ -243,7 +296,7 @@ async def place_order(
         remaining_quantity -= fill_qty
         current_position += fill_delta
 
-    # 8. Update incoming order with final remaining quantity
+    # 9. Update incoming order with final remaining quantity
     await db.update_order_quantity(incoming_order.id, remaining_quantity)
 
     # Return the resting order (if any quantity remains) or None if fully filled

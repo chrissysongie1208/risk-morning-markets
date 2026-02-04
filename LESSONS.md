@@ -36,6 +36,15 @@ Positions track `total_cost = sum(price * quantity)`. Buyer adds cost, seller su
 ### Self-trade prevention
 When matching, exclude the user's own orders from the counter-orders list.
 
+### Anti-spoofing (TODO-020) - 2026-02-04
+Anti-spoofing prevents users from placing orders that would cross their own resting orders:
+- BID at price P: reject if user has any OFFER at price <= P
+- OFFER at price P: reject if user has any BID at price >= P
+
+Implementation adds `check_spoofing()` in `matching.py` that queries user's own orders and checks for crossing prices. This runs BEFORE order creation (not during matching) so no partial order is created if rejected.
+
+Key insight: This supersedes the old self-trade prevention behavior where crossing orders were allowed but just didn't match. Now crossing orders are outright rejected, which is cleaner and prevents market manipulation.
+
 ---
 
 ## P&L Calculation

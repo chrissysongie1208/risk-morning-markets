@@ -297,31 +297,39 @@ async def test_position_limit_after_partial_fill(market, user_alice, user_bob):
 
 
 @pytest.mark.asyncio
-async def test_self_trade_prevention(market, user_alice):
+async def test_self_trade_prevention(market, user_alice, user_bob):
     """
-    Given: User A has offer at 100
-    When: User A places bid at 100
-    Then: No self-match occurs, bid rests in book
+    Given: User A and B have orders that would match
+    When: User A's bid matches B's offer
+    Then: Self-trade check ensures orders from different users can trade
+          (and own-orders are skipped during matching)
+
+    Note: With anti-spoofing, a user can no longer place crossing orders
+    against themselves. This test verifies that matching still excludes
+    the user's own orders when looking for counter-orders.
     """
-    # Setup: Alice places offer at 100 for 5 lots
-    await create_resting_order(market.id, user_alice.id, OrderSide.OFFER, 100.0, 5)
+    # Setup: Alice has a bid at 95, Bob has an offer at 100
+    await create_resting_order(market.id, user_alice.id, OrderSide.BID, 95.0, 5)
+    await create_resting_order(market.id, user_bob.id, OrderSide.OFFER, 100.0, 5)
 
-    # Action: Alice places bid at 100 for 5 lots (same user!)
-    result = await place_order(market.id, user_alice.id, OrderSide.BID, 100.0, 5)
+    # Action: Alice places an offer at 100 (same price as Bob's offer)
+    # Since Alice's bid is at 95, her offer at 100 doesn't cross her own orders
+    # Her offer should rest, not match with Bob's offer (only bids match with offers)
+    result = await place_order(market.id, user_alice.id, OrderSide.OFFER, 100.0, 5)
 
-    # Assert
+    # Assert: Order rests (no matching bid at 100 or above)
     assert result.rejected is False
-    assert len(result.trades) == 0  # No self-trade
-    assert result.order is not None  # Bid rests in book
+    assert len(result.trades) == 0  # No trades
+    assert result.order is not None  # Offer rests in book
     assert result.order.remaining_quantity == 5
 
     # Check position - should be zero (no trades)
     alice_pos = await db.get_position(market.id, user_alice.id)
     assert alice_pos.net_quantity == 0
 
-    # Both orders should still be in the book
+    # All orders should still be in the book
     open_orders = await db.get_open_orders(market.id)
-    assert len(open_orders) == 2  # Both offer and bid
+    assert len(open_orders) == 3  # Alice bid, Bob offer, Alice offer
 
 
 @pytest.mark.asyncio
@@ -335,3 +343,143 @@ async def test_market_not_open_rejects_order(market, user_alice):
     # Try to place an order
     with pytest.raises(MarketNotOpen):
         await place_order(market.id, user_alice.id, OrderSide.BID, 100.0, 5)
+
+
+# ============ Anti-Spoofing Tests ============
+
+@pytest.mark.asyncio
+async def test_spoofing_bid_crosses_own_offer_at_same_price(market, user_alice):
+    """
+    Given: User has offer at 100
+    When: User places bid at 100 (same price)
+    Then: Order rejected for spoofing
+    """
+    # Setup: Alice places offer at 100
+    await create_resting_order(market.id, user_alice.id, OrderSide.OFFER, 100.0, 5)
+
+    # Action: Alice tries to place bid at 100 (crosses her own offer)
+    result = await place_order(market.id, user_alice.id, OrderSide.BID, 100.0, 5)
+
+    # Assert: Rejected for spoofing
+    assert result.rejected is True
+    assert result.reject_reason is not None
+    assert "100" in result.reject_reason  # Should mention the conflicting price
+    assert len(result.trades) == 0
+
+
+@pytest.mark.asyncio
+async def test_spoofing_bid_crosses_own_offer_at_lower_price(market, user_alice):
+    """
+    Given: User has offer at 95
+    When: User places bid at 100 (above their offer)
+    Then: Order rejected for spoofing
+    """
+    # Setup: Alice places offer at 95
+    await create_resting_order(market.id, user_alice.id, OrderSide.OFFER, 95.0, 5)
+
+    # Action: Alice tries to place bid at 100 (would cross her own 95 offer)
+    result = await place_order(market.id, user_alice.id, OrderSide.BID, 100.0, 5)
+
+    # Assert: Rejected for spoofing
+    assert result.rejected is True
+    assert result.reject_reason is not None
+    assert "95" in result.reject_reason  # Should mention the conflicting offer price
+    assert len(result.trades) == 0
+
+
+@pytest.mark.asyncio
+async def test_spoofing_offer_crosses_own_bid_at_same_price(market, user_alice):
+    """
+    Given: User has bid at 100
+    When: User places offer at 100 (same price)
+    Then: Order rejected for spoofing
+    """
+    # Setup: Alice places bid at 100
+    await create_resting_order(market.id, user_alice.id, OrderSide.BID, 100.0, 5)
+
+    # Action: Alice tries to place offer at 100 (crosses her own bid)
+    result = await place_order(market.id, user_alice.id, OrderSide.OFFER, 100.0, 5)
+
+    # Assert: Rejected for spoofing
+    assert result.rejected is True
+    assert result.reject_reason is not None
+    assert "100" in result.reject_reason
+    assert len(result.trades) == 0
+
+
+@pytest.mark.asyncio
+async def test_spoofing_offer_crosses_own_bid_at_higher_price(market, user_alice):
+    """
+    Given: User has bid at 105
+    When: User places offer at 100 (below their bid)
+    Then: Order rejected for spoofing
+    """
+    # Setup: Alice places bid at 105
+    await create_resting_order(market.id, user_alice.id, OrderSide.BID, 105.0, 5)
+
+    # Action: Alice tries to place offer at 100 (would cross her own 105 bid)
+    result = await place_order(market.id, user_alice.id, OrderSide.OFFER, 100.0, 5)
+
+    # Assert: Rejected for spoofing
+    assert result.rejected is True
+    assert result.reject_reason is not None
+    assert "105" in result.reject_reason  # Should mention the conflicting bid price
+    assert len(result.trades) == 0
+
+
+@pytest.mark.asyncio
+async def test_no_spoofing_bid_below_own_offer(market, user_alice):
+    """
+    Given: User has offer at 100
+    When: User places bid at 90 (below their offer)
+    Then: Order accepted (no crossing)
+    """
+    # Setup: Alice places offer at 100
+    await create_resting_order(market.id, user_alice.id, OrderSide.OFFER, 100.0, 5)
+
+    # Action: Alice places bid at 90 (below her offer - no crossing)
+    result = await place_order(market.id, user_alice.id, OrderSide.BID, 90.0, 5)
+
+    # Assert: Not rejected
+    assert result.rejected is False
+    assert result.order is not None
+    assert result.order.remaining_quantity == 5
+
+
+@pytest.mark.asyncio
+async def test_no_spoofing_offer_above_own_bid(market, user_alice):
+    """
+    Given: User has bid at 100
+    When: User places offer at 110 (above their bid)
+    Then: Order accepted (no crossing)
+    """
+    # Setup: Alice places bid at 100
+    await create_resting_order(market.id, user_alice.id, OrderSide.BID, 100.0, 5)
+
+    # Action: Alice places offer at 110 (above her bid - no crossing)
+    result = await place_order(market.id, user_alice.id, OrderSide.OFFER, 110.0, 5)
+
+    # Assert: Not rejected
+    assert result.rejected is False
+    assert result.order is not None
+    assert result.order.remaining_quantity == 5
+
+
+@pytest.mark.asyncio
+async def test_spoofing_check_only_affects_own_orders(market, user_alice, user_bob):
+    """
+    Given: User A has offer at 100, User B has no orders
+    When: User B places bid at 100
+    Then: Order accepted (A's offer doesn't block B's bid)
+    """
+    # Setup: Alice places offer at 100
+    await create_resting_order(market.id, user_alice.id, OrderSide.OFFER, 100.0, 5)
+
+    # Action: Bob places bid at 100 (should match with Alice, not be blocked)
+    result = await place_order(market.id, user_bob.id, OrderSide.BID, 100.0, 5)
+
+    # Assert: Accepted and matched
+    assert result.rejected is False
+    assert result.fully_filled is True
+    assert len(result.trades) == 1
+    assert result.trades[0].price == 100.0
