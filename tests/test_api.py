@@ -1536,3 +1536,314 @@ async def test_cleanup_stale_participants_with_no_activity():
     # Verify participant is unclaimed
     participant_after = await db.get_participant_by_id(participant_id)
     assert participant_after.claimed_by_user_id is None
+
+
+# ============ One-Click Trading (Aggress) Tests ============
+
+@pytest.mark.asyncio
+async def test_aggress_offer_creates_buy():
+    """POST /orders/{id}/aggress on an offer creates a buy order and matches."""
+    transport = ASGITransport(app=app)
+
+    # Create two participants
+    seller_id = await create_participant_and_get_id("AggressSeller")
+    buyer_id = await create_participant_and_get_id("AggressBuyer")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+
+        # Admin creates a market
+        await seller.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        response = await seller.post(
+            "/admin/markets",
+            data={"question": "Aggress test market?"},
+            follow_redirects=True
+        )
+
+        # Get the market ID
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Aggress test" in m.question][0]
+
+        # Seller places an offer at 50
+        await seller.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "50", "quantity": "5"},
+            follow_redirects=True
+        )
+
+    # Get the seller's order
+    offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+    assert len(offers) == 1
+    offer_id = offers[0].id
+
+    # Buyer aggresses the offer
+    async with AsyncClient(transport=transport, base_url="http://test") as buyer:
+        await buyer.post("/join", data={"participant_id": buyer_id}, follow_redirects=False)
+
+        response = await buyer.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "3"},
+            follow_redirects=False
+        )
+
+        # Should succeed
+        assert response.status_code == 303
+
+    # Check a trade happened
+    trades = await db.get_recent_trades(market.id)
+    assert len(trades) >= 1
+    trade = trades[0]
+    assert trade.quantity == 3
+    assert trade.price == 50.0
+
+    # The offer should have remaining quantity of 2
+    offer_after = await db.get_order(offer_id)
+    assert offer_after.remaining_quantity == 2
+
+
+@pytest.mark.asyncio
+async def test_aggress_bid_creates_sell():
+    """POST /orders/{id}/aggress on a bid creates a sell order and matches."""
+    transport = ASGITransport(app=app)
+
+    # Create two participants
+    buyer_id = await create_participant_and_get_id("AggressBidBuyer")
+    seller_id = await create_participant_and_get_id("AggressBidSeller")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as buyer:
+        await buyer.post("/join", data={"participant_id": buyer_id}, follow_redirects=False)
+
+        # Admin creates a market
+        await buyer.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        response = await buyer.post(
+            "/admin/markets",
+            data={"question": "Aggress bid test market?"},
+            follow_redirects=True
+        )
+
+        # Get the market ID
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Aggress bid test" in m.question][0]
+
+        # Buyer places a bid at 48
+        await buyer.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "BID", "price": "48", "quantity": "4"},
+            follow_redirects=True
+        )
+
+    # Get the buyer's bid order
+    bids = await db.get_open_orders(market.id, side=db.OrderSide.BID)
+    assert len(bids) == 1
+    bid_id = bids[0].id
+
+    # Seller aggresses the bid (sells to it)
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+
+        response = await seller.post(
+            f"/orders/{bid_id}/aggress",
+            data={"quantity": "2"},
+            follow_redirects=False
+        )
+
+        # Should succeed
+        assert response.status_code == 303
+
+    # Check a trade happened
+    trades = await db.get_recent_trades(market.id)
+    assert len(trades) >= 1
+    trade = trades[0]
+    assert trade.quantity == 2
+    assert trade.price == 48.0
+
+    # The bid should have remaining quantity of 2
+    bid_after = await db.get_order(bid_id)
+    assert bid_after.remaining_quantity == 2
+
+
+@pytest.mark.asyncio
+async def test_aggress_own_order_rejected():
+    """POST /orders/{id}/aggress on your own order is rejected."""
+    transport = ASGITransport(app=app)
+
+    # Create a participant
+    participant_id = await create_participant_and_get_id("AggressOwnOrder")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post("/join", data={"participant_id": participant_id}, follow_redirects=False)
+
+        # Admin creates a market
+        await client.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await client.post(
+            "/admin/markets",
+            data={"question": "Aggress own order test?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Aggress own order" in m.question][0]
+
+        # Place an offer
+        await client.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "50", "quantity": "5"},
+            follow_redirects=True
+        )
+
+        # Get the order
+        offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+        assert len(offers) == 1
+        offer_id = offers[0].id
+
+        # Try to aggress own order
+        response = await client.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "3"},
+            follow_redirects=False,
+            headers={"HX-Request": "true"}
+        )
+
+        # Should get error via toast header
+        assert response.status_code == 200
+        assert "HX-Toast-Error" in response.headers
+        assert "own order" in response.headers["HX-Toast-Error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_aggress_nonexistent_order():
+    """POST /orders/{id}/aggress on a non-existent order returns error."""
+    transport = ASGITransport(app=app)
+
+    participant_id = await create_participant_and_get_id("AggressNonexistent")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post("/join", data={"participant_id": participant_id}, follow_redirects=False)
+
+        # Try to aggress a fake order ID
+        response = await client.post(
+            "/orders/fake-order-id-12345/aggress",
+            data={"quantity": "1"},
+            follow_redirects=False,
+            headers={"HX-Request": "true"}
+        )
+
+        # Should get error
+        assert response.status_code == 200
+        assert "HX-Toast-Error" in response.headers
+        assert "no longer available" in response.headers["HX-Toast-Error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_aggress_filled_order():
+    """POST /orders/{id}/aggress on a filled order returns error."""
+    transport = ASGITransport(app=app)
+
+    # Create participants
+    maker_id = await create_participant_and_get_id("AggressFilledMaker")
+    taker1_id = await create_participant_and_get_id("AggressFilledTaker1")
+    taker2_id = await create_participant_and_get_id("AggressFilledTaker2")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as maker:
+        await maker.post("/join", data={"participant_id": maker_id}, follow_redirects=False)
+
+        # Admin creates a market
+        await maker.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await maker.post(
+            "/admin/markets",
+            data={"question": "Aggress filled order test?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Aggress filled order" in m.question][0]
+
+        # Maker places a small offer
+        await maker.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "50", "quantity": "2"},
+            follow_redirects=True
+        )
+
+    offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+    offer_id = offers[0].id
+
+    # First taker fills the order completely
+    async with AsyncClient(transport=transport, base_url="http://test") as taker1:
+        await taker1.post("/join", data={"participant_id": taker1_id}, follow_redirects=False)
+        await taker1.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "2"},
+            follow_redirects=False
+        )
+
+    # Second taker tries to aggress the now-filled order
+    async with AsyncClient(transport=transport, base_url="http://test") as taker2:
+        await taker2.post("/join", data={"participant_id": taker2_id}, follow_redirects=False)
+
+        response = await taker2.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "1"},
+            follow_redirects=False,
+            headers={"HX-Request": "true"}
+        )
+
+        # Should get error
+        assert response.status_code == 200
+        assert "HX-Toast-Error" in response.headers
+        assert "no longer available" in response.headers["HX-Toast-Error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_aggress_partial_fill():
+    """POST /orders/{id}/aggress with more quantity than available fills what's available."""
+    transport = ASGITransport(app=app)
+
+    seller_id = await create_participant_and_get_id("AggressPartialSeller")
+    buyer_id = await create_participant_and_get_id("AggressPartialBuyer")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+
+        # Admin creates a market
+        await seller.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await seller.post(
+            "/admin/markets",
+            data={"question": "Aggress partial test?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Aggress partial" in m.question][0]
+
+        # Seller places offer for 3 lots
+        await seller.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "50", "quantity": "3"},
+            follow_redirects=True
+        )
+
+    offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+    offer_id = offers[0].id
+
+    # Buyer tries to aggress for 10 lots (more than available)
+    async with AsyncClient(transport=transport, base_url="http://test") as buyer:
+        await buyer.post("/join", data={"participant_id": buyer_id}, follow_redirects=False)
+
+        response = await buyer.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "10"},
+            follow_redirects=False,
+            headers={"HX-Request": "true"}
+        )
+
+        # Should succeed (capped at available quantity)
+        assert response.status_code == 200
+        assert "HX-Toast-Success" in response.headers
+        # Message should indicate actual fill amount
+        success_msg = response.headers["HX-Toast-Success"]
+        assert "3" in success_msg  # Filled 3 lots (what was available)
+
+    # Check order is fully filled
+    offer_after = await db.get_order(offer_id)
+    assert offer_after.remaining_quantity == 0

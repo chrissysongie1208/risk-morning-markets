@@ -292,6 +292,14 @@
     // ============ HTMX Event Handlers ============
     // Handle HTMX responses for inline form submissions
     document.body.addEventListener('htmx:beforeRequest', function(event) {
+        // For aggress forms, set the quantity from click size input
+        if (event.detail.elt.classList && event.detail.elt.classList.contains('aggress-form')) {
+            const qtyInput = event.detail.elt.querySelector('.aggress-qty');
+            if (qtyInput) {
+                qtyInput.value = getClickSize();
+            }
+        }
+
         // Disable submit button during request
         const button = event.detail.elt.querySelector('button[type="submit"]');
         if (button) {
@@ -332,13 +340,50 @@
         checkPositionChange();
     });
 
+    // ============ Click Size Persistence ============
+    function initClickSize() {
+        const clickSizeInput = document.getElementById('click-size-input');
+        if (!clickSizeInput) return;
+
+        // Load from localStorage
+        const savedSize = localStorage.getItem('clickSize');
+        if (savedSize && !isNaN(parseInt(savedSize, 10))) {
+            clickSizeInput.value = savedSize;
+        }
+
+        // Save on change
+        clickSizeInput.addEventListener('change', function() {
+            const val = parseInt(this.value, 10);
+            if (val && val > 0) {
+                localStorage.setItem('clickSize', val.toString());
+            }
+        });
+    }
+
+    // Get current click size
+    function getClickSize() {
+        const input = document.getElementById('click-size-input');
+        if (input) {
+            const val = parseInt(input.value, 10);
+            if (val && val > 0) return val;
+        }
+        return 1;
+    }
+
+    // Expose getClickSize for inline use
+    window.getClickSize = getClickSize;
+
     // ============ Initialization ============
     document.addEventListener('click', initAudio, { once: true });
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', connectWebSocket);
+        document.addEventListener('DOMContentLoaded', function() {
+            connectWebSocket();
+            initClickSize();
+        });
     } else {
         connectWebSocket();
+        initClickSize();
     }
 
     window.addEventListener('beforeunload', function() {
@@ -412,6 +457,18 @@
             </div>
         </form>
         <small>Position limit: {{ position_limit }} lots. Your current position: {{ position.net_quantity if position else 0 }} lots.</small>
+    </section>
+
+    <!-- Click Trading Size -->
+    <section class="click-size-section">
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <label style="margin-bottom: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <strong>Click Size:</strong>
+                <input type="number" id="click-size-input" min="1" max="{{ position_limit }}" value="1" style="width: 5rem; margin-bottom: 0;">
+                <span>lots</span>
+            </label>
+            <small style="color: var(--pico-muted-color);">Click "Trade" on orderbook to instantly trade at that price</small>
+        </div>
     </section>
 
     {% if user.is_admin %}

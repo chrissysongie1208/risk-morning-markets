@@ -756,3 +756,60 @@ This TODO only changes:
 2. Backend response format for HTMX requests
 
 The endpoints still return the same redirects for non-HTMX requests, so all 89 existing tests pass unchanged.
+
+---
+
+## One-Click Trading / Aggress Endpoint (TODO-037) - 2026-02-04
+
+### Aggressing vs. placing crossing orders
+"Aggressing" is a trading term meaning to immediately trade against a resting order. When you aggress:
+- An **offer**: You place a BID at that price (buying/hitting the offer)
+- A **bid**: You place an OFFER at that price (selling/lifting the bid)
+
+The aggress endpoint is a convenience wrapper around the existing `place_order()` function - it creates the appropriate crossing order automatically.
+
+### Capping quantity at available
+When the user requests more quantity than the target order has available, the backend caps the quantity at `target_order.remaining_quantity`. This prevents creating a resting order (the user only wanted to trade against that specific order).
+
+```python
+available_qty = target_order.remaining_quantity
+actual_qty = min(quantity, available_qty)
+```
+
+The success message reflects any difference: "Bought 3 of 5 requested @ 50.00"
+
+### Click size with localStorage persistence
+The click size input uses localStorage to persist across page refreshes:
+```javascript
+// On load: restore from localStorage
+const savedSize = localStorage.getItem('clickSize');
+if (savedSize) clickSizeInput.value = savedSize;
+
+// On change: save to localStorage
+clickSizeInput.addEventListener('change', function() {
+    localStorage.setItem('clickSize', this.value);
+});
+```
+
+### HTMX form quantity injection
+The hidden quantity field in aggress forms is populated just before submission using HTMX's `htmx:beforeRequest` event:
+```javascript
+document.body.addEventListener('htmx:beforeRequest', function(event) {
+    if (event.detail.elt.classList.contains('aggress-form')) {
+        const qtyInput = event.detail.elt.querySelector('.aggress-qty');
+        qtyInput.value = getClickSize();
+    }
+});
+```
+
+### Button labels reflect action direction
+Trade buttons show "Buy" (green/primary) for hitting offers and "Sell" (contrast) for lifting bids. This makes the UI intuitive - clicking "Buy" on an offer row buys that offer.
+
+### Test count increased from 89 to 95
+Added 6 new tests:
+- `test_aggress_offer_creates_buy` - Hitting an offer creates a buy
+- `test_aggress_bid_creates_sell` - Lifting a bid creates a sell
+- `test_aggress_own_order_rejected` - Can't trade against your own order
+- `test_aggress_nonexistent_order` - Graceful handling of missing orders
+- `test_aggress_filled_order` - Graceful handling of already-filled orders
+- `test_aggress_partial_fill` - Quantity capped at available amount

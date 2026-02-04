@@ -16,7 +16,7 @@ import database as db
 import auth
 import matching
 import settlement
-from models import MarketStatus, OrderSide, OrderWithUser, TradeWithUsers, PositionWithPnL
+from models import MarketStatus, OrderSide, OrderStatus, OrderWithUser, TradeWithUsers, PositionWithPnL
 
 # Template directory
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -397,6 +397,126 @@ async def cancel_order(request: Request, order_id: str, session: Optional[str] =
             return HTMLResponse(content="", headers={"HX-Toast-Error": str(e)})
         return RedirectResponse(
             url=f"/markets/{market_id}?" + urlencode({"error": str(e)}),
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+
+
+@app.post("/orders/{order_id}/aggress")
+async def aggress_order(
+    request: Request,
+    order_id: str,
+    quantity: int = Form(...),
+    session: Optional[str] = Cookie(None)
+):
+    """Aggress a resting order by trading against it.
+
+    Creates a crossing order that immediately matches with the target order.
+    For offers: creates a BID at the offer price (hitting the offer).
+    For bids: creates an OFFER at the bid price (lifting the bid).
+    """
+    user = await auth.get_current_user(session)
+    if not user:
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": "Session expired"})
+        return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+
+    # Get the target order
+    target_order = await db.get_order(order_id)
+    if not target_order:
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": "Order no longer available"})
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    market_id = target_order.market_id
+
+    # Check if order is still open
+    if target_order.status != OrderStatus.OPEN:
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": "Order no longer available"})
+        return RedirectResponse(
+            url=f"/markets/{market_id}?" + urlencode({"error": "Order no longer available"}),
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    # Can't aggress your own order
+    if target_order.user_id == user.id:
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": "Cannot trade against your own order"})
+        return RedirectResponse(
+            url=f"/markets/{market_id}?" + urlencode({"error": "Cannot trade against your own order"}),
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    # Validate quantity
+    if quantity <= 0:
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": "Quantity must be positive"})
+        return RedirectResponse(
+            url=f"/markets/{market_id}?" + urlencode({"error": "Quantity must be positive"}),
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    # Determine the crossing order side and price
+    # To hit an OFFER (sell), we place a BID at that price
+    # To lift a BID (buy), we place an OFFER at that price
+    if target_order.side == OrderSide.OFFER:
+        aggress_side = OrderSide.BID
+        action_verb = "Bought"
+    else:
+        aggress_side = OrderSide.OFFER
+        action_verb = "Sold"
+
+    aggress_price = target_order.price
+
+    # Cap the quantity at what's available in the target order
+    available_qty = target_order.remaining_quantity
+    actual_qty = min(quantity, available_qty)
+
+    try:
+        result = await matching.place_order(
+            market_id=market_id,
+            user_id=user.id,
+            side=aggress_side,
+            price=aggress_price,
+            quantity=actual_qty
+        )
+
+        if result.rejected:
+            error_msg = result.reject_reason or "Order rejected"
+            if is_htmx_request(request):
+                return HTMLResponse(content="", headers={"HX-Toast-Error": error_msg})
+            return RedirectResponse(
+                url=f"/markets/{market_id}?" + urlencode({"error": error_msg}),
+                status_code=status.HTTP_303_SEE_OTHER
+            )
+
+        # Build success message
+        if result.trades:
+            total_filled = sum(t.quantity for t in result.trades)
+            if total_filled < quantity:
+                msg = f"{action_verb} {total_filled} of {quantity} requested @ {aggress_price:.2f}"
+            else:
+                msg = f"{action_verb} {total_filled} @ {aggress_price:.2f}"
+        else:
+            # This shouldn't happen for an aggress (should always match)
+            msg = f"Order placed: {actual_qty} lots @ {aggress_price}"
+
+        # Broadcast update to all WebSocket clients
+        await broadcast_market_update(market_id)
+
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Success": msg})
+        return RedirectResponse(
+            url=f"/markets/{market_id}?" + urlencode({"success": msg}),
+            status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    except matching.MarketNotOpen:
+        error_msg = "Market is not open for trading"
+        if is_htmx_request(request):
+            return HTMLResponse(content="", headers={"HX-Toast-Error": error_msg})
+        return RedirectResponse(
+            url=f"/markets/{market_id}?" + urlencode({"error": error_msg}),
             status_code=status.HTTP_303_SEE_OTHER
         )
 
