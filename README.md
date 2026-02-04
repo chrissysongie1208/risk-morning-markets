@@ -1,6 +1,10 @@
 # Morning Markets - Prediction Market App
 
+🎯 **Live at: https://risk-morning-markets.onrender.com**
+
 A web-based prediction market application for trivia-style questions. Users can trade on market outcomes, and an admin settles markets with the actual answer to determine winners.
+
+**Internal app for morning market games** - designed for <20 concurrent users.
 
 ## Quick Start (Local Development)
 
@@ -46,45 +50,29 @@ docker-compose down
 docker-compose down -v
 ```
 
-## Deploy to Render.com
+## Production Deployment
 
-Render.com provides free hosting with PostgreSQL. Follow these steps:
+The app is deployed and running at:
+- **URL**: https://risk-morning-markets.onrender.com
+- **Hosting**: Render.com (free tier web service)
+- **Database**: Neon PostgreSQL (free tier, no expiry)
+- **GitHub**: https://github.com/chrissysongie1208/risk-morning-markets
 
-### Step 1: Push to GitHub
+### Deploying Updates
 
 ```bash
+# Make changes, then:
 git add .
-git commit -m "Ready for deployment"
+git commit -m "Description of changes"
 git push origin main
+# Render auto-deploys on push (~2-3 min)
 ```
 
-### Step 2: Create Render Account
+### Infrastructure Notes
 
-1. Go to [render.com](https://render.com)
-2. Sign up with GitHub (recommended) or email
-
-### Step 3: Deploy with Blueprint
-
-1. In Render dashboard, click **New** → **Blueprint**
-2. Connect your GitHub repository
-3. Render will automatically detect `render.yaml` and configure:
-   - **Web Service**: Python app running uvicorn
-   - **PostgreSQL Database**: Free tier database
-4. Click **Apply** to start deployment
-5. Wait for build (~2-3 minutes)
-
-### Step 4: Access Your App
-
-Once deployed, Render provides a URL like:
-```
-https://morning-markets.onrender.com
-```
-
-### Render Free Tier Notes
-
-- **Database**: Free PostgreSQL expires after 90 days
-- **Web Service**: Sleeps after 15 minutes of inactivity (~30s cold start)
-- **Custom Domain**: Available on paid plans
+- **Cold starts**: After 15 min of inactivity, first request takes ~30 seconds
+- **Database**: Neon free tier has no expiry (unlike Render's 90-day limit)
+- **Auto-deploy**: Pushes to `main` branch trigger automatic redeploys
 
 ## Environment Variables
 
@@ -104,9 +92,12 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5432/morning_markets \
   cd src && uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-### On Render.com
+### On Render.com (Production)
 
-The `DATABASE_URL` is automatically set when you link the PostgreSQL database.
+The `DATABASE_URL` is configured in Render dashboard pointing to Neon PostgreSQL:
+```
+postgresql://neondb_owner:***@ep-aged-star-a1jt7vg3-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+```
 
 ## Features
 
