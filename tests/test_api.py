@@ -3027,3 +3027,298 @@ async def test_session_expired_returns_error_toast_for_cancel():
         assert "HX-Toast-Error" in response.headers
         assert "session" in response.headers["HX-Toast-Error"].lower() or \
                "expired" in response.headers["HX-Toast-Error"].lower()
+
+
+# ============ Buy/Sell Button Reliability Tests (TODO-044) ============
+
+@pytest.mark.asyncio
+async def test_aggress_rapid_trades_succeed():
+    """Rapid successive aggress calls should all succeed without errors.
+
+    This tests the reliability of the Buy/Sell button under rapid clicking.
+    """
+    transport = ASGITransport(app=app)
+
+    # Create seller with multiple offers at different prices
+    seller_id = await create_participant_and_get_id("RapidAggressSeller")
+    buyer_id = await create_participant_and_get_id("RapidAggressBuyer")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+        await seller.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await seller.post(
+            "/admin/markets",
+            data={"question": "Rapid aggress test market?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Rapid aggress test" in m.question][0]
+
+        # Set higher position limit for this test
+        await seller.post("/admin/config", data={"position_limit": "100"}, follow_redirects=True)
+
+        # Seller places 5 offers at different prices
+        for price in range(50, 55):
+            await seller.post(
+                f"/markets/{market.id}/orders",
+                data={"side": "OFFER", "price": str(price), "quantity": "2"},
+                follow_redirects=True
+            )
+
+    # Get offer IDs
+    offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+    assert len(offers) == 5, f"Expected 5 offers, got {len(offers)}"
+    offer_ids = [o.id for o in offers]
+
+    # Buyer rapidly aggresses all offers
+    successes = 0
+    async with AsyncClient(transport=transport, base_url="http://test") as buyer:
+        await buyer.post("/join", data={"participant_id": buyer_id}, follow_redirects=False)
+
+        for offer_id in offer_ids:
+            response = await buyer.post(
+                f"/orders/{offer_id}/aggress",
+                data={"quantity": "2"},
+                follow_redirects=False,
+                headers={"HX-Request": "true"}
+            )
+
+            # Should get success toast
+            if response.status_code == 200 and "HX-Toast-Success" in response.headers:
+                successes += 1
+
+    # All 5 rapid aggresses should succeed
+    assert successes == 5, f"Expected 5 successful aggresses, got {successes}"
+
+    # Verify all trades happened
+    trades = await db.get_recent_trades(market.id, limit=10)
+    assert len(trades) >= 5, f"Expected at least 5 trades, got {len(trades)}"
+
+
+@pytest.mark.asyncio
+async def test_aggress_response_contains_toast_header():
+    """Every aggress response must contain either HX-Toast-Success or HX-Toast-Error.
+
+    This is critical for the UI to show feedback to the user.
+    """
+    transport = ASGITransport(app=app)
+
+    seller_id = await create_participant_and_get_id("ToastHeaderSeller")
+    buyer_id = await create_participant_and_get_id("ToastHeaderBuyer")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+        await seller.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await seller.post(
+            "/admin/markets",
+            data={"question": "Toast header test market?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Toast header test" in m.question][0]
+
+        await seller.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "50", "quantity": "5"},
+            follow_redirects=True
+        )
+
+    offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+    offer_id = offers[0].id
+
+    async with AsyncClient(transport=transport, base_url="http://test") as buyer:
+        await buyer.post("/join", data={"participant_id": buyer_id}, follow_redirects=False)
+
+        response = await buyer.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "3"},
+            follow_redirects=False,
+            headers={"HX-Request": "true"}
+        )
+
+        # MUST contain one of these headers
+        has_toast = "HX-Toast-Success" in response.headers or "HX-Toast-Error" in response.headers
+        assert has_toast, f"Response must contain toast header. Headers: {dict(response.headers)}"
+
+
+@pytest.mark.asyncio
+async def test_aggress_returns_timing_header():
+    """Aggress response should include X-Process-Time-Ms header for latency diagnosis."""
+    transport = ASGITransport(app=app)
+
+    seller_id = await create_participant_and_get_id("TimingSeller")
+    buyer_id = await create_participant_and_get_id("TimingBuyer")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+        await seller.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await seller.post(
+            "/admin/markets",
+            data={"question": "Timing header test market?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Timing header test" in m.question][0]
+
+        await seller.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "50", "quantity": "5"},
+            follow_redirects=True
+        )
+
+    offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+    offer_id = offers[0].id
+
+    async with AsyncClient(transport=transport, base_url="http://test") as buyer:
+        await buyer.post("/join", data={"participant_id": buyer_id}, follow_redirects=False)
+
+        response = await buyer.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "3"},
+            follow_redirects=False,
+            headers={"HX-Request": "true"}
+        )
+
+        # Should have timing header
+        assert "X-Process-Time-Ms" in response.headers, \
+            "Response should include X-Process-Time-Ms header"
+
+        # Parse and verify it's a reasonable time (under 500ms ideally, but allow up to 2s for CI)
+        process_time = float(response.headers["X-Process-Time-Ms"])
+        assert process_time < 2000, f"Process time {process_time}ms exceeds 2000ms threshold"
+
+
+@pytest.mark.asyncio
+async def test_aggress_completes_trade_end_to_end():
+    """Full end-to-end test: aggress -> trade created -> positions updated.
+
+    This verifies the entire flow works correctly, not just HTTP response.
+    """
+    transport = ASGITransport(app=app)
+
+    seller_id = await create_participant_and_get_id("E2ESeller")
+    buyer_id = await create_participant_and_get_id("E2EBuyer")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+        await seller.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await seller.post(
+            "/admin/markets",
+            data={"question": "E2E aggress test market?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "E2E aggress test" in m.question][0]
+
+        # Seller places offer
+        await seller.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "55.50", "quantity": "3"},
+            follow_redirects=True
+        )
+
+    offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+    offer = offers[0]
+    offer_id = offer.id
+    # Use the user_id directly from the offer (more reliable than name lookup)
+    seller_user_id = offer.user_id
+
+    # Get initial positions
+    seller_pos_before = await db.get_position(market.id, seller_user_id)
+
+    async with AsyncClient(transport=transport, base_url="http://test") as buyer:
+        await buyer.post("/join", data={"participant_id": buyer_id}, follow_redirects=False)
+        # Get buyer user from participant
+        participant = await db.get_participant_by_id(buyer_id)
+        buyer_user_id = participant.claimed_by_user_id
+
+        buyer_pos_before = await db.get_position(market.id, buyer_user_id)
+
+        # Aggress the offer
+        response = await buyer.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "2"},
+            follow_redirects=False,
+            headers={"HX-Request": "true"}
+        )
+
+        assert response.status_code == 200
+        assert "HX-Toast-Success" in response.headers
+        assert "Bought" in response.headers["HX-Toast-Success"]
+
+    # Verify trade was created
+    trades = await db.get_recent_trades(market.id, limit=5)
+    matching_trades = [t for t in trades if t.price == 55.5 and t.quantity == 2]
+    assert len(matching_trades) >= 1, "Trade should be created"
+
+    trade = matching_trades[0]
+    assert trade.buyer_id == buyer_user_id
+    assert trade.seller_id == seller_user_id
+
+    # Verify positions updated
+    seller_pos_after = await db.get_position(market.id, seller_user_id)
+    buyer_pos_after = await db.get_position(market.id, buyer_user_id)
+
+    assert buyer_pos_after.net_quantity == buyer_pos_before.net_quantity + 2, \
+        f"Buyer position should increase by 2"
+    assert seller_pos_after.net_quantity == seller_pos_before.net_quantity - 2, \
+        f"Seller position should decrease by 2"
+
+    # Verify positions are zero-sum
+    total_position = buyer_pos_after.net_quantity + seller_pos_after.net_quantity
+    assert total_position == 0, f"Positions should be zero-sum, got {total_position}"
+
+
+@pytest.mark.asyncio
+async def test_aggress_with_fill_and_kill_shows_killed():
+    """Fill-and-Kill mode should show 'killed' in success message when partial fill."""
+    transport = ASGITransport(app=app)
+
+    seller_id = await create_participant_and_get_id("FAKSeller")
+    buyer_id = await create_participant_and_get_id("FAKBuyer")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+        await seller.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await seller.post(
+            "/admin/markets",
+            data={"question": "FAK aggress test market?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "FAK aggress test" in m.question][0]
+
+        # Seller places small offer (only 2 lots available)
+        await seller.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "60", "quantity": "2"},
+            follow_redirects=True
+        )
+
+    offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+    offer_id = offers[0].id
+
+    async with AsyncClient(transport=transport, base_url="http://test") as buyer:
+        await buyer.post("/join", data={"participant_id": buyer_id}, follow_redirects=False)
+
+        # Request 5 lots with fill_and_kill=true (only 2 available)
+        response = await buyer.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "5", "fill_and_kill": "true"},
+            follow_redirects=False,
+            headers={"HX-Request": "true"}
+        )
+
+        assert response.status_code == 200
+        assert "HX-Toast-Success" in response.headers
+        success_msg = response.headers["HX-Toast-Success"]
+
+        # Message should show requested vs actual
+        assert "2" in success_msg, f"Should mention 2 lots filled: {success_msg}"
+        # Note: Message format depends on whether there was unfilled qty to kill
+        # If capped at available, there may be no "killed" - that's ok

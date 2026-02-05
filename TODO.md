@@ -102,5 +102,19 @@
 
 - [x] TODO-043: Comprehensive test audit and improvements. Current tests miss bugs that users find in UI. Add/improve tests for: (1) **Error message delivery**: Test that ALL rejection scenarios (spoofing, position limit, market closed, etc.) return proper `HX-Toast-Error` headers. (2) **Full flow integration tests**: Test complete flows like "place order → verify in orderbook → trade against it → verify positions updated → verify trade in recent trades". (3) **Edge cases**: Partial fills, order gone before aggress, self-trade attempts, concurrent trades on same order. (4) **WebSocket delivery**: Test that broadcasts actually send correct HTML to connected clients. (5) **Aggress endpoint**: Test all scenarios - full fill, partial fill, order not found, own order, fill-and-kill mode. Each test should verify the COMPLETE expected outcome, not just "no error thrown".
 
+---
+
+## CRITICAL - Production Issues
+
+- [x] TODO-044: **CRITICAL** - Buy/Sell button reliability audit. Improved WebSocket broadcast to use parallel processing with asyncio.gather(). Added granular timing logs to aggress endpoint (auth, lookup, match, cancel, broadcast). Added 5 new reliability tests. See LESSONS.md for detailed analysis. **REQUIRES HUMAN VERIFICATION** - Please test in production with multiple rapid trades and report if issues persist.
+
+---
+
+## New Features
+
+- [ ] TODO-045: Aggregate orders at same price level in orderbook display. Currently if a user places 2 separate BUY orders at the same price (e.g., 5 lots @ 50, then 3 lots @ 50), they show as 2 separate rows. Instead, aggregate them into a single row showing combined quantity (8 lots @ 50). Only aggregate orders from the SAME user on the SAME side at the SAME price. Different users' orders at the same price should still show separately (important for queue priority visibility). Update orderbook partial template and the database query that fetches orders. Add tests: (1) Same user, same side, same price → aggregated. (2) Same user, same side, different price → separate rows. (3) Different users, same price → separate rows.
+
+- [ ] TODO-046: Queue priority display in orderbook - ensure time priority is visually clear. Orders should be displayed showing queue priority (first-in-first-out within same price level). For BIDS: the first person to bid at price X should appear at the TOP of that price level's orders. For OFFERS: the first person to offer at price X should appear at the BOTTOM of that price level's orders. This reflects actual fill priority - the matching engine uses price-time priority, so the display should match. Verify the SQL query uses `ORDER BY created_at ASC` within each price level. Update orderbook template if needed. Add test that verifies display order matches fill priority.
+
 <!-- Add new TODOs here with sequential IDs -->
 

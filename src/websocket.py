@@ -109,6 +109,7 @@ class ConnectionManager:
     ):
         """Send a personal update to a specific user in a market."""
         if market_id not in self._connections:
+            logger.debug(f"send_personal_update: No connections for market {market_id}")
             return
 
         for websocket, uid in list(self._connections[market_id]):
@@ -123,7 +124,13 @@ class ConnectionManager:
                             logger.warning(
                                 f"SLOW: WebSocket personal send to user {user_id} took {send_time:.2f}ms"
                             )
-                except Exception:
+                    else:
+                        logger.warning(
+                            f"WebSocket not connected for user {user_id}, state={websocket.client_state}"
+                        )
+                        self.disconnect(websocket, market_id, uid)
+                except Exception as e:
+                    logger.warning(f"WebSocket send failed for user {user_id}: {e}")
                     self.disconnect(websocket, market_id, uid)
 
     def record_pong(self, websocket: WebSocket):

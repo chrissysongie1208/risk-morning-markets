@@ -1,5 +1,6 @@
 """Main FastAPI application for Morning Markets prediction market."""
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -478,14 +479,22 @@ async def aggress_order(
 
     If fill_and_kill is True, any unfilled quantity is cancelled (no resting order).
     """
+    endpoint_start = time.perf_counter()
+
+    # Auth check with timing
+    auth_start = time.perf_counter()
     user = await auth.get_current_user(session)
+    auth_time = (time.perf_counter() - auth_start) * 1000
+
     if not user:
         if is_htmx_request(request):
             return HTMLResponse(content="", headers={"HX-Toast-Error": "Session expired"})
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
-    # Get the target order
+    # Get the target order with timing
+    order_lookup_start = time.perf_counter()
     target_order = await db.get_order(order_id)
+    order_lookup_time = (time.perf_counter() - order_lookup_start) * 1000
     if not target_order:
         if is_htmx_request(request):
             return HTMLResponse(content="", headers={"HX-Toast-Error": "Order no longer available"})
@@ -596,10 +605,20 @@ async def aggress_order(
             logger.warning(f"SLOW: WebSocket broadcast took {broadcast_time:.2f}ms (market={market_id})")
 
         # Log total operation breakdown for debugging
+        total_endpoint_time = (time.perf_counter() - endpoint_start) * 1000
         logger.info(
-            f"aggress_order: match={match_time:.1f}ms, cancel={cancel_time:.1f}ms, "
-            f"broadcast={broadcast_time:.1f}ms, trades={len(result.trades)}, user={user.display_name}"
+            f"aggress_order: auth={auth_time:.1f}ms, lookup={order_lookup_time:.1f}ms, "
+            f"match={match_time:.1f}ms, cancel={cancel_time:.1f}ms, broadcast={broadcast_time:.1f}ms, "
+            f"total={total_endpoint_time:.1f}ms, trades={len(result.trades)}, user={user.display_name}"
         )
+
+        # Warn if total time is slow
+        if total_endpoint_time > SLOW_OPERATION_THRESHOLD * 1000:
+            logger.warning(
+                f"SLOW aggress_order: {total_endpoint_time:.1f}ms "
+                f"(auth={auth_time:.1f}, lookup={order_lookup_time:.1f}, "
+                f"match={match_time:.1f}, broadcast={broadcast_time:.1f})"
+            )
 
         if is_htmx_request(request):
             return HTMLResponse(content="", headers={"HX-Toast-Success": msg})
@@ -1306,18 +1325,67 @@ async def broadcast_market_update(market_id: str):
     """Broadcast market update to all connected WebSocket clients.
 
     Each client receives a personalized HTML update based on their user_id.
+    Uses parallel processing for better performance with multiple clients.
     """
+    broadcast_start = time.perf_counter()
+
     # Get all connected users for this market
     if market_id not in ws_manager._connections:
+        logger.debug(f"broadcast: No connections for market {market_id}")
         return
 
-    for websocket, user_id in list(ws_manager._connections[market_id]):
+    connections = list(ws_manager._connections[market_id])
+    client_count = len(connections)
+
+    if client_count == 0:
+        return
+
+    logger.info(f"broadcast: Starting for market {market_id}, clients={client_count}")
+
+    async def send_to_client(websocket, user_id):
+        """Send personalized update to a single client."""
+        client_start = time.perf_counter()
         try:
             html = await generate_market_html_for_user(market_id, user_id)
+            html_gen_time = (time.perf_counter() - client_start) * 1000
+
+            send_start = time.perf_counter()
             await ws_manager.send_personal_update(market_id, user_id, html)
-        except Exception:
-            # Connection error, will be cleaned up by manager
-            pass
+            send_time = (time.perf_counter() - send_start) * 1000
+
+            total_time = (time.perf_counter() - client_start) * 1000
+
+            if total_time > SLOW_OPERATION_THRESHOLD * 1000:
+                logger.warning(
+                    f"SLOW: broadcast to user {user_id}: "
+                    f"html_gen={html_gen_time:.1f}ms, send={send_time:.1f}ms, total={total_time:.1f}ms"
+                )
+            return True, user_id, total_time
+        except Exception as e:
+            logger.warning(f"broadcast: Failed to send to user {user_id}: {e}")
+            return False, user_id, 0
+
+    # Process all clients in parallel for better performance
+    tasks = [send_to_client(ws, uid) for ws, uid in connections]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Count successes and failures
+    successes = sum(1 for r in results if isinstance(r, tuple) and r[0])
+    failures = client_count - successes
+
+    total_time = (time.perf_counter() - broadcast_start) * 1000
+
+    # Log summary
+    if total_time > SLOW_OPERATION_THRESHOLD * 1000:
+        logger.warning(
+            f"SLOW broadcast: market={market_id}, clients={client_count}, "
+            f"successes={successes}, failures={failures}, total_time={total_time:.1f}ms"
+        )
+    else:
+        logger.info(
+            f"broadcast: market={market_id}, clients={client_count}, "
+            f"successes={successes}, failures={failures}, total_time={total_time:.1f}ms"
+        )
 
 
 @app.websocket("/ws/market/{market_id}")

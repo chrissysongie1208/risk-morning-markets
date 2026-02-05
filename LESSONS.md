@@ -1124,3 +1124,69 @@ Added 16 new tests covering:
 - 9 error message delivery tests (position limit, market closed, invalid inputs, cancel scenarios, aggress scenarios, session expired)
 - 2 full flow integration tests (order→trade→verify, multiple trades→settlement→P&L)
 - 5 edge case tests (concurrent aggress, aggress on closed market, cancel already cancelled, session expired for different endpoints)
+
+---
+
+## Buy/Sell Button Reliability Audit (TODO-044) - 2026-02-05
+
+### Root causes of potential latency issues identified:
+
+1. **Sequential WebSocket broadcasts**: Previously, when broadcasting updates to all connected clients, the server was sending HTML to each client one at a time. For N clients, this was O(N) sequential network operations.
+
+2. **HTML generation per user**: Each connected WebSocket client receives personalized HTML (their own position highlighted, their own orders marked). This requires a full render per user, including database queries for orderbook, trades, and positions.
+
+3. **Missing detailed timing logs**: While basic timing middleware existed, the aggress endpoint didn't log granular breakdown of where time was spent (auth, order lookup, matching, broadcast).
+
+### Improvements implemented:
+
+1. **Parallel broadcast processing**: Changed `broadcast_market_update()` to use `asyncio.gather()` for sending updates to all clients in parallel instead of sequentially. This reduces broadcast time from O(N) to O(1) (wall clock time).
+
+2. **Granular timing in aggress endpoint**: Added timing logs for each step:
+   - `auth_time`: Time to validate session cookie
+   - `order_lookup_time`: Time to fetch target order from database
+   - `match_time`: Time for matching engine to process order
+   - `cancel_time`: Time for F&K cancellation (if applicable)
+   - `broadcast_time`: Time to send WebSocket updates
+
+3. **Better error logging in WebSocket manager**: Added detailed warning logs when:
+   - Connection state is not CONNECTED
+   - Send operations fail
+   - Broadcasts have failures
+
+### Key insight: Parallel async operations
+
+When broadcasting to multiple WebSocket clients, using `asyncio.gather()` allows all send operations to happen concurrently:
+
+```python
+# Before (sequential)
+for websocket, user_id in connections:
+    await ws_manager.send_personal_update(market_id, user_id, html)
+
+# After (parallel)
+tasks = [send_to_client(ws, uid) for ws, uid in connections]
+results = await asyncio.gather(*tasks, return_exceptions=True)
+```
+
+This is crucial for real-time trading apps where multiple users need updates simultaneously.
+
+### Diagnosing latency with logs
+
+The timing logs now show a complete breakdown:
+```
+aggress_order: auth=1.2ms, lookup=3.5ms, match=15.8ms, cancel=0.0ms, broadcast=45.2ms, total=65.7ms, trades=1, user=Alice
+```
+
+If any operation exceeds 500ms, a separate WARNING is logged:
+```
+SLOW aggress_order: 850.3ms (auth=1.1, lookup=503.2, match=12.4, broadcast=333.6)
+```
+
+This helps identify whether slowness is in the database (lookup), matching engine, or network (broadcast).
+
+### Test count increased from 118 to 123
+Added 5 new reliability tests:
+- `test_aggress_rapid_trades_succeed` - 5 rapid successive trades all succeed
+- `test_aggress_response_contains_toast_header` - Every response has HX-Toast header
+- `test_aggress_returns_timing_header` - X-Process-Time-Ms header present and reasonable
+- `test_aggress_completes_trade_end_to_end` - Full flow verification (aggress→trade→positions)
+- `test_aggress_with_fill_and_kill_shows_killed` - F&K message format correct
