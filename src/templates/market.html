@@ -298,11 +298,15 @@
     // NOTE: These must be attached after DOM is ready since script is in <head>
     function setupHTMXEventHandlers() {
         document.body.addEventListener('htmx:beforeRequest', function(event) {
-            // For aggress forms, set the quantity from click size input
+            // For aggress forms, set the quantity and fill_and_kill from controls
             if (event.detail.elt.classList && event.detail.elt.classList.contains('aggress-form')) {
                 const qtyInput = event.detail.elt.querySelector('.aggress-qty');
                 if (qtyInput) {
                     qtyInput.value = getClickSize();
+                }
+                const fakInput = event.detail.elt.querySelector('.aggress-fak');
+                if (fakInput) {
+                    fakInput.value = getFillAndKill() ? 'true' : 'false';
                 }
             }
 
@@ -382,6 +386,32 @@
     // Expose getClickSize for inline use
     window.getClickSize = getClickSize;
 
+    // ============ Fill-and-Kill Toggle Persistence ============
+    function initFillAndKill() {
+        const toggle = document.getElementById('fill-and-kill-toggle');
+        if (!toggle) return;
+
+        // Load from localStorage
+        const savedValue = localStorage.getItem('fillAndKill');
+        if (savedValue === 'true') {
+            toggle.checked = true;
+        }
+
+        // Save on change
+        toggle.addEventListener('change', function() {
+            localStorage.setItem('fillAndKill', this.checked ? 'true' : 'false');
+        });
+    }
+
+    // Get current fill-and-kill setting
+    function getFillAndKill() {
+        const toggle = document.getElementById('fill-and-kill-toggle');
+        return toggle ? toggle.checked : false;
+    }
+
+    // Expose getFillAndKill for inline use
+    window.getFillAndKill = getFillAndKill;
+
     // ============ Initialization ============
     document.addEventListener('click', initAudio, { once: true });
 
@@ -390,11 +420,13 @@
             setupHTMXEventHandlers();
             connectWebSocket();
             initClickSize();
+            initFillAndKill();
         });
     } else {
         setupHTMXEventHandlers();
         connectWebSocket();
         initClickSize();
+        initFillAndKill();
     }
 
     window.addEventListener('beforeunload', function() {
@@ -470,15 +502,19 @@
         <small>Position limit: {{ position_limit }} lots. Your current position: {{ position.net_quantity if position else 0 }} lots.</small>
     </section>
 
-    <!-- Click Trading Size -->
+    <!-- Click Trading Size & Fill-and-Kill Option -->
     <section class="click-size-section">
-        <div style="display: flex; align-items: center; gap: 1rem;">
+        <div style="display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
             <label style="margin-bottom: 0; display: flex; align-items: center; gap: 0.5rem;">
                 <strong>Click Size:</strong>
                 <input type="number" id="click-size-input" min="1" max="{{ position_limit }}" value="1" style="width: 5rem; margin-bottom: 0;">
                 <span>lots</span>
             </label>
-            <small style="color: var(--pico-muted-color);">Click "Trade" on orderbook to instantly trade at that price</small>
+            <label style="margin-bottom: 0; display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" id="fill-and-kill-toggle" style="margin-bottom: 0;">
+                <strong>Fill & Kill</strong>
+            </label>
+            <small style="color: var(--pico-muted-color);">When F&K is on, unfilled quantity won't become a resting order</small>
         </div>
     </section>
 

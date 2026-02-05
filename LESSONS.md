@@ -952,3 +952,60 @@ When HTMX forms/buttons don't work after dynamic DOM updates:
 ### Test count increased from 97 to 98
 Added 1 new test:
 - `test_aggress_htmx_returns_toast_success` - Verifies aggress endpoint returns HX-Toast-Success header for HTMX requests
+
+---
+
+## Fill-and-Kill Order Type (TODO-041) - 2026-02-05
+
+### What is Fill-and-Kill?
+Fill-and-Kill (F&K) is an order execution mode where any unfilled portion of an order is automatically cancelled (killed) rather than becoming a resting order in the book. This is useful for traders who only want to trade against specific visible liquidity without inadvertently creating new orders.
+
+### Implementation approach
+The F&K feature was added to the aggress endpoint (one-click trading):
+1. **Backend**: Added `fill_and_kill: bool = Form(False)` parameter to `/orders/{id}/aggress`
+2. **Frontend**: Added checkbox toggle with localStorage persistence
+3. **Forms**: Added hidden `fill_and_kill` field to aggress forms, populated via JS before submission
+
+### Handling unfilled remainder
+When `fill_and_kill=true` and the order has a resting portion after matching:
+```python
+if fill_and_kill and result.order and result.order.remaining_quantity > 0:
+    unfilled_qty = result.order.remaining_quantity
+    await matching.cancel_order(result.order.id, user.id)
+```
+
+The message is updated to show what was killed:
+- `"Bought 3 of 5 requested @ 50.00 (2 killed)"` for partial fills with remainder cancelled
+
+### Aggress endpoint quantity capping
+The aggress endpoint caps requested quantity at the target order's available quantity BEFORE calling `place_order`:
+```python
+available_qty = target_order.remaining_quantity
+actual_qty = min(quantity, available_qty)
+```
+
+This means F&K primarily affects cases where:
+1. The matching engine partially fills due to position limits during matching
+2. The user requests more than available (capped, so no resting order anyway)
+
+### localStorage persistence for user preferences
+Both click size and fill-and-kill preference are persisted in localStorage:
+```javascript
+// Save on change
+toggle.addEventListener('change', function() {
+    localStorage.setItem('fillAndKill', this.checked ? 'true' : 'false');
+});
+
+// Load on page init
+const savedValue = localStorage.getItem('fillAndKill');
+if (savedValue === 'true') {
+    toggle.checked = true;
+}
+```
+
+### Test count increased from 98 to 102
+Added 4 new tests:
+- `test_fill_and_kill_cancels_unfilled_remainder` - F&K with full fill works
+- `test_fill_and_kill_message_shows_requested_vs_filled` - Message shows requested vs filled amounts
+- `test_fill_and_kill_false_creates_resting_order` - F&K off doesn't say "killed"
+- `test_fill_and_kill_default_is_false` - Default behavior is unchanged

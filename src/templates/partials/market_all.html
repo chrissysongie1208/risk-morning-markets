@@ -86,6 +86,7 @@ Price Ladder: vertical layout with price in center
                 {% elif order.user_id != user.id and market.status.value == 'OPEN' %}
                 <form hx-post="/orders/{{ order.id }}/aggress" hx-swap="none" style="display:inline;" class="aggress-form">
                     <input type="hidden" name="quantity" class="aggress-qty">
+                    <input type="hidden" name="fill_and_kill" class="aggress-fak" value="false">
                     <button type="submit" class="ladder-btn ladder-buy-btn" title="Buy this offer">
                         <span class="btn-spinner spinner" style="width:0.7em;height:0.7em;border-width:1px;"></span>
                         <span class="btn-text">Buy</span>
@@ -121,6 +122,7 @@ Price Ladder: vertical layout with price in center
                 {% elif order.user_id != user.id and market.status.value == 'OPEN' %}
                 <form hx-post="/orders/{{ order.id }}/aggress" hx-swap="none" style="display:inline;" class="aggress-form">
                     <input type="hidden" name="quantity" class="aggress-qty">
+                    <input type="hidden" name="fill_and_kill" class="aggress-fak" value="false">
                     <button type="submit" class="ladder-btn ladder-sell-btn" title="Sell to this bid">
                         <span class="btn-spinner spinner" style="width:0.7em;height:0.7em;border-width:1px;"></span>
                         <span class="btn-text">Sell</span>

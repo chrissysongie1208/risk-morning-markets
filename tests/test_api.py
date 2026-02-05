@@ -1997,3 +1997,219 @@ async def test_aggress_htmx_returns_toast_success():
         # Should contain "Bought" and the price
         assert "Bought" in success_msg
         assert "50" in success_msg
+
+
+# ============ Fill-and-Kill Tests ============
+
+@pytest.mark.asyncio
+async def test_fill_and_kill_cancels_unfilled_remainder():
+    """POST /orders/{id}/aggress with fill_and_kill=true cancels unfilled portion."""
+    transport = ASGITransport(app=app)
+
+    seller_id = await create_participant_and_get_id("FAKSeller1")
+    buyer_id = await create_participant_and_get_id("FAKBuyer1")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as admin:
+        await admin.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await admin.post(
+            "/admin/markets",
+            data={"question": "Fill-and-kill cancel test?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Fill-and-kill cancel" in m.question][0]
+
+    # Seller places offer for 3 lots at 50
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+        await seller.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "50", "quantity": "3"},
+            follow_redirects=True
+        )
+
+    offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+    offer_id = offers[0].id
+
+    # Count orders before aggress
+    all_orders_before = await db.get_open_orders(market.id)
+    order_count_before = len(all_orders_before)
+
+    # Buyer aggresses with fill_and_kill=true for 3 lots (should fully fill)
+    async with AsyncClient(transport=transport, base_url="http://test") as buyer:
+        await buyer.post("/join", data={"participant_id": buyer_id}, follow_redirects=False)
+
+        response = await buyer.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "3", "fill_and_kill": "true"},
+            follow_redirects=False,
+            headers={"HX-Request": "true"}
+        )
+
+        assert response.status_code == 200
+        assert "HX-Toast-Success" in response.headers
+        success_msg = response.headers["HX-Toast-Success"]
+        assert "Bought" in success_msg
+        assert "3" in success_msg
+
+    # Verify: No resting orders from buyer (filled completely or killed)
+    # The offer should be filled, no new resting bid created
+    all_orders_after = await db.get_open_orders(market.id)
+    # Original offer is now filled (order_count_before - 1), and no new order was created
+    assert len(all_orders_after) == 0  # All orders filled
+
+
+@pytest.mark.asyncio
+async def test_fill_and_kill_message_shows_requested_vs_filled():
+    """POST /orders/{id}/aggress with fill_and_kill=true shows correct message when capped by available qty."""
+    transport = ASGITransport(app=app)
+
+    seller_id = await create_participant_and_get_id("FAKMsgSeller")
+    buyer_id = await create_participant_and_get_id("FAKMsgBuyer")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as admin:
+        await admin.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await admin.post(
+            "/admin/markets",
+            data={"question": "Fill-and-kill msg test?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Fill-and-kill msg" in m.question][0]
+
+    # Seller places offer for only 3 lots at 50
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+        await seller.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "50", "quantity": "3"},
+            follow_redirects=True
+        )
+
+    offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+    assert len(offers) > 0, "Seller's offer should have been placed"
+    offer_id = offers[0].id
+
+    # Buyer aggresses with fill_and_kill=true for 10 lots (more than available)
+    # The actual fill is capped at 3 (what's available)
+    async with AsyncClient(transport=transport, base_url="http://test") as buyer:
+        await buyer.post("/join", data={"participant_id": buyer_id}, follow_redirects=False)
+
+        response = await buyer.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "10", "fill_and_kill": "true"},
+            follow_redirects=False,
+            headers={"HX-Request": "true"}
+        )
+
+        assert response.status_code == 200
+        assert "HX-Toast-Success" in response.headers
+        success_msg = response.headers["HX-Toast-Success"]
+        # Should show partial fill message
+        assert "Bought" in success_msg
+        assert "3" in success_msg  # Filled 3 lots (what was available)
+        assert "10" in success_msg  # Requested 10
+
+    # Verify no resting bid order was created by the buyer
+    bids_after = await db.get_open_orders(market.id, side=db.OrderSide.BID)
+    buyer_user = await db.get_user_by_name("FAKMsgBuyer")
+    buyer_bids = [b for b in bids_after if b.user_id == buyer_user.id]
+    assert len(buyer_bids) == 0  # No resting bids from buyer
+
+
+@pytest.mark.asyncio
+async def test_fill_and_kill_false_creates_resting_order():
+    """POST /orders/{id}/aggress with fill_and_kill=false (default) creates resting order for remainder."""
+    transport = ASGITransport(app=app)
+
+    seller_id = await create_participant_and_get_id("FAKOffSeller")
+    buyer_id = await create_participant_and_get_id("FAKOffBuyer")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as admin:
+        await admin.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await admin.post(
+            "/admin/markets",
+            data={"question": "Fill-and-kill off test?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Fill-and-kill off" in m.question][0]
+
+    # Seller places offer for 3 lots at 50
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+        await seller.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "50", "quantity": "3"},
+            follow_redirects=True
+        )
+
+    offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+    offer_id = offers[0].id
+
+    # Buyer aggresses with fill_and_kill=false for 3 lots (should fully fill, no remainder)
+    async with AsyncClient(transport=transport, base_url="http://test") as buyer:
+        await buyer.post("/join", data={"participant_id": buyer_id}, follow_redirects=False)
+
+        response = await buyer.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "3", "fill_and_kill": "false"},
+            follow_redirects=False,
+            headers={"HX-Request": "true"}
+        )
+
+        assert response.status_code == 200
+        assert "HX-Toast-Success" in response.headers
+        # No "killed" in message since it filled completely
+        success_msg = response.headers["HX-Toast-Success"]
+        assert "killed" not in success_msg.lower()
+
+
+@pytest.mark.asyncio
+async def test_fill_and_kill_default_is_false():
+    """POST /orders/{id}/aggress without fill_and_kill param uses default (false)."""
+    transport = ASGITransport(app=app)
+
+    seller_id = await create_participant_and_get_id("FAKDefaultSeller")
+    buyer_id = await create_participant_and_get_id("FAKDefaultBuyer")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as admin:
+        await admin.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await admin.post(
+            "/admin/markets",
+            data={"question": "Fill-and-kill default test?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Fill-and-kill default" in m.question][0]
+
+    # Seller places offer for 5 lots at 50
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+        await seller.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "50", "quantity": "5"},
+            follow_redirects=True
+        )
+
+    offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+    offer_id = offers[0].id
+
+    # Buyer aggresses WITHOUT fill_and_kill param (should default to false)
+    async with AsyncClient(transport=transport, base_url="http://test") as buyer:
+        await buyer.post("/join", data={"participant_id": buyer_id}, follow_redirects=False)
+
+        response = await buyer.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "5"},  # No fill_and_kill param
+            follow_redirects=False,
+            headers={"HX-Request": "true"}
+        )
+
+        # Should succeed
+        assert response.status_code == 200
+        assert "HX-Toast-Success" in response.headers

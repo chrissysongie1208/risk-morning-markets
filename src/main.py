@@ -406,6 +406,7 @@ async def aggress_order(
     request: Request,
     order_id: str,
     quantity: int = Form(...),
+    fill_and_kill: bool = Form(False),
     session: Optional[str] = Cookie(None)
 ):
     """Aggress a resting order by trading against it.
@@ -413,6 +414,8 @@ async def aggress_order(
     Creates a crossing order that immediately matches with the target order.
     For offers: creates a BID at the offer price (hitting the offer).
     For bids: creates an OFFER at the bid price (lifting the bid).
+
+    If fill_and_kill is True, any unfilled quantity is cancelled (no resting order).
     """
     user = await auth.get_current_user(session)
     if not user:
@@ -490,16 +493,29 @@ async def aggress_order(
                 status_code=status.HTTP_303_SEE_OTHER
             )
 
+        # Handle fill-and-kill: cancel any resting order (unfilled portion)
+        unfilled_qty = 0
+        if fill_and_kill and result.order and result.order.remaining_quantity > 0:
+            unfilled_qty = result.order.remaining_quantity
+            await matching.cancel_order(result.order.id, user.id)
+
         # Build success message
         if result.trades:
             total_filled = sum(t.quantity for t in result.trades)
             if total_filled < quantity:
-                msg = f"{action_verb} {total_filled} of {quantity} requested @ {aggress_price:.2f}"
+                if fill_and_kill and unfilled_qty > 0:
+                    msg = f"{action_verb} {total_filled} of {quantity} requested @ {aggress_price:.2f} ({unfilled_qty} killed)"
+                else:
+                    msg = f"{action_verb} {total_filled} of {quantity} requested @ {aggress_price:.2f}"
             else:
                 msg = f"{action_verb} {total_filled} @ {aggress_price:.2f}"
         else:
             # This shouldn't happen for an aggress (should always match)
-            msg = f"Order placed: {actual_qty} lots @ {aggress_price}"
+            # But with fill_and_kill, if no matches happened, the order was cancelled
+            if fill_and_kill:
+                msg = f"No fill available, order killed"
+            else:
+                msg = f"Order placed: {actual_qty} lots @ {aggress_price}"
 
         # Broadcast update to all WebSocket clients
         await broadcast_market_update(market_id)

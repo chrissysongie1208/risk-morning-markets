@@ -88,5 +88,19 @@
 
 - [x] TODO-040: BUG - Trade buttons (Buy/Sell) on orderbook don't execute trades. Repro: User A has resting OFFER at 50. User B clicks "Trade" button on that offer. Expected: Trade executes, positions update. Actual: Nothing happens. Debug steps: (1) Check `POST /orders/{id}/aggress` endpoint exists and is correct. (2) Check the Trade button form has correct `hx-post` URL and params. (3) Check the aggress endpoint calls `matching.place_order()` with correct side/price. (4) Check WebSocket broadcast happens after trade. (5) Write test for aggress endpoint that verifies trade execution. Fix the broken link in the chain.
 
+---
+
+## New Features
+
+- [x] TODO-041: Fill-and-Kill option for Trade button. Add user preference (checkbox or toggle near Click Size) for "Fill and Kill" mode. When enabled: clicking Trade fills as much as possible from the target order, but does NOT create a resting order for unfilled quantity. When disabled (default): current behavior where remainder becomes a resting quote. Store preference in localStorage alongside click_size. Backend: add `fill_and_kill` param to `/orders/{id}/aggress` endpoint. If true and order can't fully fill, fill what's available and return without creating resting order. Update toast message: "Bought 3 lots @ 50 (2 unfilled, killed)".
+
+- [ ] TODO-042: Add request timing/latency logging. Help diagnose 4-5 second latency issues. (1) Backend: Add logging to key endpoints showing processing time (order placement, aggress, WebSocket broadcast). Use Python `time.perf_counter()` to measure. Log if any operation takes >500ms. (2) Frontend: Add optional debug mode that shows round-trip time for actions in console. (3) WebSocket: Log time between broadcast call and message send. This helps identify if latency is network, database, or code.
+
+---
+
+## Test Coverage Improvements
+
+- [ ] TODO-043: Comprehensive test audit and improvements. Current tests miss bugs that users find in UI. Add/improve tests for: (1) **Error message delivery**: Test that ALL rejection scenarios (spoofing, position limit, market closed, etc.) return proper `HX-Toast-Error` headers. (2) **Full flow integration tests**: Test complete flows like "place order → verify in orderbook → trade against it → verify positions updated → verify trade in recent trades". (3) **Edge cases**: Partial fills, order gone before aggress, self-trade attempts, concurrent trades on same order. (4) **WebSocket delivery**: Test that broadcasts actually send correct HTML to connected clients. (5) **Aggress endpoint**: Test all scenarios - full fill, partial fill, order not found, own order, fill-and-kill mode. Each test should verify the COMPLETE expected outcome, not just "no error thrown".
+
 <!-- Add new TODOs here with sequential IDs -->
 
