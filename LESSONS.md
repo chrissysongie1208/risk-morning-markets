@@ -1369,3 +1369,32 @@ This fix addresses the DOM race condition but needs real-world testing:
 - Rapid clicking on multiple Buy/Sell buttons
 - Multiple users trading simultaneously
 - Verifying >95% success rate as mentioned in TODO-047
+
+---
+
+## When Automated Tests Can't Cover a Bug (TODO-048) - 2026-02-05
+
+### Some bugs require human verification
+Race conditions involving real browser DOM, WebSocket connections, and timing are notoriously difficult to test with automated frameworks. The Buy/Sell button bug (TODO-047) only manifested with:
+- Real WebSocket connections (not mocked `AsyncClient`)
+- Real browser DOM (not simulated HTML parsing)
+- Multiple concurrent users causing updates
+
+### Creating verification TODOs
+When a fix addresses a race condition or timing bug that can't be fully tested programmatically, create a follow-up TODO specifically for human verification:
+
+1. **Be explicit**: Mark it with `HUMAN VERIFICATION REQUIRED`
+2. **List test scenarios**: Exact steps to reproduce the fixed issue
+3. **Define success criteria**: What should happen (e.g., ">95% success rate")
+4. **Provide debugging tools**: Console logging, DevTools instructions
+5. **Document fallback plan**: What to try if the fix doesn't work
+
+### The verification TODO is not complete until human confirms
+An automated agent cannot mark a human verification TODO as complete. The workflow is:
+1. Agent implements fix, pushes to production
+2. Agent creates verification TODO with instructions
+3. **Human tests in production**
+4. **Human reports results**
+5. Agent marks TODO complete or investigates further based on feedback
+
+This acknowledges the limits of automated testing for certain classes of bugs.
