@@ -40,6 +40,56 @@
     let audioContext = null;
     let soundEnabled = false;
 
+    // ============ Aggress Form Submission Lock ============
+    // Prevents WebSocket DOM updates from destroying forms mid-submission
+    let aggressInProgress = false;
+    let pendingOrderbookUpdate = null;
+    let aggressSubmissionTimeout = null;
+    const AGGRESS_LOCK_TIMEOUT = 2000; // Max time to hold lock (safety valve)
+
+    function startAggressLock() {
+        aggressInProgress = true;
+        pendingOrderbookUpdate = null;
+        console.log('[AGGRESS] Lock acquired - WebSocket orderbook updates paused');
+
+        // Safety valve: auto-release lock after timeout
+        if (aggressSubmissionTimeout) {
+            clearTimeout(aggressSubmissionTimeout);
+        }
+        aggressSubmissionTimeout = setTimeout(function() {
+            console.log('[AGGRESS] Lock timeout - forcing release');
+            releaseAggressLock();
+        }, AGGRESS_LOCK_TIMEOUT);
+    }
+
+    function releaseAggressLock() {
+        if (aggressSubmissionTimeout) {
+            clearTimeout(aggressSubmissionTimeout);
+            aggressSubmissionTimeout = null;
+        }
+
+        aggressInProgress = false;
+        console.log('[AGGRESS] Lock released');
+
+        // Apply any pending orderbook update
+        if (pendingOrderbookUpdate) {
+            console.log('[AGGRESS] Applying pending orderbook update');
+            applyOrderbookUpdate(pendingOrderbookUpdate);
+            pendingOrderbookUpdate = null;
+        }
+    }
+
+    function applyOrderbookUpdate(newOrderbook) {
+        const orderbookTarget = document.getElementById('orderbook');
+        if (orderbookTarget && newOrderbook) {
+            orderbookTarget.innerHTML = newOrderbook.innerHTML;
+            // Re-process HTMX attributes on newly added elements (forms, buttons)
+            if (typeof htmx !== 'undefined') {
+                htmx.process(orderbookTarget);
+            }
+        }
+    }
+
     // ============ Toast Notifications ============
     function showToast(message, isError) {
         const container = document.getElementById('toast-container');
@@ -165,16 +215,15 @@
             }
         }
 
-        // Update orderbook (OOB swap)
+        // Update orderbook (OOB swap) - but defer if aggress is in progress
         const newOrderbook = doc.getElementById('orderbook');
         if (newOrderbook) {
-            const orderbookTarget = document.getElementById('orderbook');
-            if (orderbookTarget) {
-                orderbookTarget.innerHTML = newOrderbook.innerHTML;
-                // Re-process HTMX attributes on newly added elements (forms, buttons)
-                if (typeof htmx !== 'undefined') {
-                    htmx.process(orderbookTarget);
-                }
+            if (aggressInProgress) {
+                // Store update to apply after aggress completes
+                console.log('[AGGRESS] Deferring orderbook update (submission in progress)');
+                pendingOrderbookUpdate = newOrderbook;
+            } else {
+                applyOrderbookUpdate(newOrderbook);
             }
         }
 
@@ -326,7 +375,11 @@
             htmxRequestTimes.set(event.detail.elt, performance.now());
 
             // For aggress forms, set the quantity and fill_and_kill from controls
+            // AND acquire the aggress lock to prevent WebSocket DOM updates
             if (event.detail.elt.classList && event.detail.elt.classList.contains('aggress-form')) {
+                // Acquire lock to prevent WebSocket from destroying our form mid-submission
+                startAggressLock();
+
                 const qtyInput = event.detail.elt.querySelector('.aggress-qty');
                 if (qtyInput) {
                     qtyInput.value = getClickSize();
@@ -349,6 +402,11 @@
             const button = event.detail.elt.querySelector('button[type="submit"]');
             if (button) {
                 button.disabled = false;
+            }
+
+            // Release aggress lock if this was an aggress form submission
+            if (event.detail.elt.classList && event.detail.elt.classList.contains('aggress-form')) {
+                releaseAggressLock();
             }
 
             // Log round-trip timing

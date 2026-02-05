@@ -1287,3 +1287,85 @@ Added 3 new tests:
 - `test_queue_priority_bids_first_bidder_at_top` - First bidder at same price appears first in HTML
 - `test_queue_priority_offers_first_offerer_at_bottom` - First offerer at same price appears last in HTML (bottom of price level)
 - `test_queue_priority_matches_fill_order` - Verifies that the first bidder actually gets filled first (matching engine confirmation)
+
+---
+
+## Buy/Sell Button Race Condition Fix (TODO-047) - 2026-02-05
+
+### Root cause: WebSocket DOM updates destroying forms mid-submission
+The Buy/Sell buttons on the orderbook were failing ~80% of the time due to a race condition:
+
+1. User clicks Buy/Sell button on an orderbook row
+2. `htmx:beforeRequest` fires, HTMX starts the POST request
+3. **Meanwhile**, WebSocket broadcasts an update from another user's action
+4. `updateFromWebSocket()` replaces `orderbookTarget.innerHTML` with new HTML
+5. The form the user just clicked **no longer exists in the DOM**
+6. HTMX can't complete the submission because the form element is gone
+
+The user report mentioned seeing "the clicking user's order appear as a quote, then disappear after the trade" - this is actually correct behavior from `matching.place_order()` which creates an order first then matches. But the primary issue was forms being destroyed by WebSocket updates.
+
+### The fix: Aggress form submission lock
+Added a client-side locking mechanism to prevent WebSocket DOM updates from interrupting form submissions:
+
+```javascript
+// State variables
+let aggressInProgress = false;
+let pendingOrderbookUpdate = null;
+
+// In htmx:beforeRequest for aggress forms
+startAggressLock();  // Blocks WebSocket orderbook updates
+
+// In htmx:afterRequest for aggress forms
+releaseAggressLock();  // Applies any pending update
+```
+
+Key components:
+1. **`startAggressLock()`**: Sets flag before form submission, with safety timeout
+2. **`releaseAggressLock()`**: Clears flag and applies any queued updates
+3. **Modified `updateFromWebSocket()`**: Checks lock before updating orderbook, queues update if locked
+4. **Safety timeout**: Auto-releases lock after 2 seconds to prevent deadlock
+
+### Why this fix over backend changes
+Three options were considered:
+
+1. **Option A (Backend)**: Rewrite `matching.py` to not create visible intermediate orders during aggress
+   - Would require significant changes to the matching engine
+   - Trade FK constraints require order IDs for both sides
+   - Higher risk of regression
+
+2. **Option B (Client-side click lock)**: Prevent DOM updates during form submission
+   - Non-invasive - only changes JavaScript
+   - Directly addresses the symptom (form destruction)
+   - Easy to test and verify
+
+3. **Option C (Skip forms during update)**: Check for `data-aggress-pending` attribute
+   - More complex than Option B
+   - Still requires modifying both submit and update code
+
+Option B was chosen for simplicity and minimal risk.
+
+### Why existing tests didn't catch this
+The race condition only manifests with:
+- Real WebSocket connections (not mocked)
+- Real browser DOM (not `AsyncClient`)
+- Multiple users causing updates while clicking
+
+The `pytest` tests use `AsyncClient` which bypasses the browser entirely. To properly test this, we would need:
+- Playwright or Selenium for browser automation
+- Multiple concurrent browser sessions
+- Timing-sensitive test scenarios
+
+### Console logging for debugging
+The fix includes console.log statements that help trace the lock behavior:
+- `[AGGRESS] Lock acquired - WebSocket orderbook updates paused`
+- `[AGGRESS] Deferring orderbook update (submission in progress)`
+- `[AGGRESS] Lock released`
+- `[AGGRESS] Applying pending orderbook update`
+
+Users can open browser DevTools to see these messages and verify the fix is working.
+
+### Requires human verification
+This fix addresses the DOM race condition but needs real-world testing:
+- Rapid clicking on multiple Buy/Sell buttons
+- Multiple users trading simultaneously
+- Verifying >95% success rate as mentioned in TODO-047
