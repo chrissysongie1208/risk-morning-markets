@@ -867,3 +867,47 @@ Both `market_all.html` (combined partial) and `orderbook.html` (deprecated stand
 
 ### No test count change
 This was primarily a UI/template change with test assertion updates. Total tests remain at 95.
+
+---
+
+## Anti-Spoofing Toast Error Bug Fix (TODO-039) - 2026-02-05
+
+### Root cause: Event listeners attached before DOM ready
+The bug was that HTMX event listeners for toast notifications were being attached to `document.body` in a script in the `<head>`, before the body element existed. This caused the event listeners to silently fail because `document.body` was `null` at the time.
+
+```javascript
+// BUG: This runs in <head> before document.body exists
+document.body.addEventListener('htmx:afterRequest', function(event) {
+    // Never fires because listener wasn't attached
+});
+```
+
+### The fix: Defer event handler setup to DOMContentLoaded
+Wrap event handler setup in a function and call it after DOM is ready:
+
+```javascript
+function setupHTMXEventHandlers() {
+    document.body.addEventListener('htmx:afterRequest', function(event) {
+        // Now this works correctly
+    });
+}
+
+// Call after DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupHTMXEventHandlers);
+} else {
+    setupHTMXEventHandlers();
+}
+```
+
+### Testing strategy for frontend bugs
+When debugging a bug where the backend works but the frontend doesn't show the result:
+1. **Write backend tests first** - Verify the API returns correct headers/response
+2. **Check event timing** - Scripts in `<head>` run before `<body>` exists
+3. **Check if listeners are attached** - Events can't fire if listeners aren't registered
+4. **Add console logging temporarily** - Help trace the execution flow
+
+### Test count increased from 95 to 97
+Added 2 new tests:
+- `test_anti_spoofing_rejection_returns_error_toast` - HTMX request returns HX-Toast-Error header
+- `test_anti_spoofing_rejection_non_htmx_returns_redirect` - Regular form submission redirects with error

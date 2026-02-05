@@ -291,54 +291,59 @@
 
     // ============ HTMX Event Handlers ============
     // Handle HTMX responses for inline form submissions
-    document.body.addEventListener('htmx:beforeRequest', function(event) {
-        // For aggress forms, set the quantity from click size input
-        if (event.detail.elt.classList && event.detail.elt.classList.contains('aggress-form')) {
-            const qtyInput = event.detail.elt.querySelector('.aggress-qty');
-            if (qtyInput) {
-                qtyInput.value = getClickSize();
+    // NOTE: These must be attached after DOM is ready since script is in <head>
+    function setupHTMXEventHandlers() {
+        document.body.addEventListener('htmx:beforeRequest', function(event) {
+            // For aggress forms, set the quantity from click size input
+            if (event.detail.elt.classList && event.detail.elt.classList.contains('aggress-form')) {
+                const qtyInput = event.detail.elt.querySelector('.aggress-qty');
+                if (qtyInput) {
+                    qtyInput.value = getClickSize();
+                }
             }
-        }
 
-        // Disable submit button during request
-        const button = event.detail.elt.querySelector('button[type="submit"]');
-        if (button) {
-            button.disabled = true;
-        }
-    });
-
-    document.body.addEventListener('htmx:afterRequest', function(event) {
-        // Re-enable submit button
-        const button = event.detail.elt.querySelector('button[type="submit"]');
-        if (button) {
-            button.disabled = false;
-        }
-
-        // Check for custom headers with toast messages
-        const xhr = event.detail.xhr;
-        if (!xhr) return;
-
-        const successMsg = xhr.getResponseHeader('HX-Toast-Success');
-        const errorMsg = xhr.getResponseHeader('HX-Toast-Error');
-
-        if (successMsg) {
-            showToast(successMsg, false);
-            // Clear the form on success (for order form)
-            if (event.detail.elt.id === 'order-form') {
-                document.getElementById('price-input').value = '';
-                document.getElementById('quantity-input').value = '';
+            // Disable submit button during request
+            const button = event.detail.elt.querySelector('button[type="submit"]');
+            if (button) {
+                button.disabled = true;
             }
-        } else if (errorMsg) {
-            showToast(errorMsg, true);
-            // Keep form values on error so user can fix and retry
-        }
-    });
+        });
 
-    // Handle position changes from HTMX polling (fallback mode)
-    document.body.addEventListener('htmx:afterSwap', function(event) {
-        if (!event.detail.target || event.detail.target.id !== 'position-content') return;
-        checkPositionChange();
-    });
+        document.body.addEventListener('htmx:afterRequest', function(event) {
+            // Re-enable submit button
+            const button = event.detail.elt.querySelector('button[type="submit"]');
+            if (button) {
+                button.disabled = false;
+            }
+
+            // Check for custom headers with toast messages
+            const xhr = event.detail.xhr;
+            if (!xhr) {
+                return;
+            }
+
+            const successMsg = xhr.getResponseHeader('HX-Toast-Success');
+            const errorMsg = xhr.getResponseHeader('HX-Toast-Error');
+
+            if (successMsg) {
+                showToast(successMsg, false);
+                // Clear the form on success (for order form)
+                if (event.detail.elt.id === 'order-form') {
+                    document.getElementById('price-input').value = '';
+                    document.getElementById('quantity-input').value = '';
+                }
+            } else if (errorMsg) {
+                showToast(errorMsg, true);
+                // Keep form values on error so user can fix and retry
+            }
+        });
+
+        // Handle position changes from HTMX polling (fallback mode)
+        document.body.addEventListener('htmx:afterSwap', function(event) {
+            if (!event.detail.target || event.detail.target.id !== 'position-content') return;
+            checkPositionChange();
+        });
+    }
 
     // ============ Click Size Persistence ============
     function initClickSize() {
@@ -378,10 +383,12 @@
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() {
+            setupHTMXEventHandlers();
             connectWebSocket();
             initClickSize();
         });
     } else {
+        setupHTMXEventHandlers();
         connectWebSocket();
         initClickSize();
     }

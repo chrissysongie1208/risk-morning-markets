@@ -1796,6 +1796,101 @@ async def test_aggress_filled_order():
         assert "no longer available" in response.headers["HX-Toast-Error"].lower()
 
 
+# ============ Anti-Spoofing Error Toast Tests (TODO-039) ============
+
+@pytest.mark.asyncio
+async def test_anti_spoofing_rejection_returns_error_toast():
+    """POST /markets/{id}/orders with spoofing violation returns HX-Toast-Error header."""
+    transport = ASGITransport(app=app)
+
+    participant_id = await create_participant_and_get_id("SpoofingTestUser")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post("/join", data={"participant_id": participant_id}, follow_redirects=False)
+
+        # Admin creates a market
+        await client.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await client.post(
+            "/admin/markets",
+            data={"question": "Spoofing error toast test?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Spoofing error toast" in m.question][0]
+
+        # Place a resting BID at 150
+        await client.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "BID", "price": "150", "quantity": "5"},
+            follow_redirects=True
+        )
+
+        # Verify the bid exists
+        bids = await db.get_open_orders(market.id, side=db.OrderSide.BID)
+        assert len(bids) == 1
+        assert bids[0].price == 150.0
+
+        # Now try to place an OFFER at 150 (same price as bid) - should trigger spoofing rejection
+        response = await client.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "150", "quantity": "3"},
+            follow_redirects=False,
+            headers={"HX-Request": "true"}  # Simulate HTMX request
+        )
+
+        # Should return success status code (200) with error header for HTMX
+        assert response.status_code == 200, f"Expected 200 but got {response.status_code}"
+        assert "HX-Toast-Error" in response.headers, \
+            f"Expected HX-Toast-Error header, got headers: {dict(response.headers)}"
+
+        # Error message should mention the spoofing issue
+        error_msg = response.headers["HX-Toast-Error"]
+        assert "bid" in error_msg.lower() or "offer" in error_msg.lower(), \
+            f"Error message should mention bid/offer: {error_msg}"
+
+
+@pytest.mark.asyncio
+async def test_anti_spoofing_rejection_non_htmx_returns_redirect():
+    """POST /markets/{id}/orders with spoofing violation redirects with error (non-HTMX)."""
+    transport = ASGITransport(app=app)
+
+    participant_id = await create_participant_and_get_id("SpoofingRedirectUser")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post("/join", data={"participant_id": participant_id}, follow_redirects=False)
+
+        # Admin creates a market
+        await client.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await client.post(
+            "/admin/markets",
+            data={"question": "Spoofing redirect test?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Spoofing redirect test" in m.question][0]
+
+        # Place a resting OFFER at 100
+        await client.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "100", "quantity": "5"},
+            follow_redirects=True
+        )
+
+        # Try to place a BID at 100 (same price as offer) - spoofing violation
+        response = await client.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "BID", "price": "100", "quantity": "3"},
+            follow_redirects=False
+            # No HX-Request header - regular form submission
+        )
+
+        # Should redirect with error in URL
+        assert response.status_code == 303
+        assert "error=" in response.headers["location"]
+
+
 @pytest.mark.asyncio
 async def test_aggress_partial_fill():
     """POST /orders/{id}/aggress with more quantity than available fills what's available."""

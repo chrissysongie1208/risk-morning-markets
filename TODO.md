@@ -80,5 +80,13 @@
 
 - [x] TODO-038: Price ladder orderbook layout. Replace side-by-side bid/offer columns with a vertical price ladder where both sides share the same price axis. Price increases going UP. Layout: `[Trade] Bids Qty | User | PRICE | User | Offers Qty [Trade]`. Best bid appears BELOW best offer with a visible spread gap between them - no visual "crossing". Bids on left side of price column, offers on right side. All prices sorted ascending (lowest at bottom, highest at top). Trade/Cancel buttons integrate with the new layout. This matches professional trading ladder UIs (CME, crypto exchanges). Example: offers at 50, 49 appear above the spread gap; bids at 47, 46 appear below. The gap between 47 and 49 is the spread.
 
+---
+
+## Bugfixes
+
+- [x] TODO-039: BUG - Anti-spoofing rejection shows no error message. Repro: User has resting BID at 150, then places OFFER at 150. Expected: toast error "Cannot place offer at or below your bid price" (or similar). Actual: Nothing happens, no error shown, order silently rejected. Debug steps: (1) Check `matching.py` `check_spoofing()` returns correct rejection. (2) Check `main.py` `place_order()` returns `HX-Toast-Error` header on rejection. (3) Check `market.html` JS listener for `htmx:afterRequest` reads header and calls `showToast()`. (4) Write test that verifies anti-spoofing rejection returns proper error response with header. Fix the broken link in the chain.
+
+- [ ] TODO-040: BUG - Trade buttons (Buy/Sell) on orderbook don't execute trades. Repro: User A has resting OFFER at 50. User B clicks "Trade" button on that offer. Expected: Trade executes, positions update. Actual: Nothing happens. Debug steps: (1) Check `POST /orders/{id}/aggress` endpoint exists and is correct. (2) Check the Trade button form has correct `hx-post` URL and params. (3) Check the aggress endpoint calls `matching.place_order()` with correct side/price. (4) Check WebSocket broadcast happens after trade. (5) Write test for aggress endpoint that verifies trade execution. Fix the broken link in the chain.
+
 <!-- Add new TODOs here with sequential IDs -->
 
