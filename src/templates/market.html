@@ -9,6 +9,24 @@
     // Market ID from URL
     const marketId = '{{ market.id }}';
 
+    // Debug mode - set to true in console to enable timing logs
+    // Usage: window.enableDebugTiming(true) or set localStorage.setItem('debugTiming', 'true')
+    let debugTimingEnabled = localStorage.getItem('debugTiming') === 'true';
+
+    // Enable/disable debug timing from console
+    window.enableDebugTiming = function(enabled) {
+        debugTimingEnabled = enabled;
+        localStorage.setItem('debugTiming', enabled ? 'true' : 'false');
+        console.log('Debug timing ' + (enabled ? 'enabled' : 'disabled'));
+    };
+
+    // Log timing information (only if debug mode enabled)
+    function logTiming(operation, startTime, details) {
+        if (!debugTimingEnabled) return;
+        const elapsed = performance.now() - startTime;
+        console.log('[TIMING] ' + operation + ': ' + elapsed.toFixed(1) + 'ms', details || '');
+    }
+
     // WebSocket state
     let ws = null;
     let reconnectAttempts = 0;
@@ -224,6 +242,7 @@
             };
 
             ws.onmessage = function(event) {
+                const receiveTime = performance.now();
                 const data = event.data;
 
                 // Handle ping from server
@@ -247,7 +266,9 @@
 
                 // Handle HTML update
                 if (data.includes('<div') || data.includes('<p')) {
+                    const updateStart = performance.now();
                     updateFromWebSocket(data);
+                    logTiming('WebSocket DOM update', updateStart, 'dataLength=' + data.length);
                 }
             };
 
@@ -296,8 +317,14 @@
     // ============ HTMX Event Handlers ============
     // Handle HTMX responses for inline form submissions
     // NOTE: These must be attached after DOM is ready since script is in <head>
+    // Track request start times for latency measurement
+    const htmxRequestTimes = new Map();
+
     function setupHTMXEventHandlers() {
         document.body.addEventListener('htmx:beforeRequest', function(event) {
+            // Record start time for timing measurement
+            htmxRequestTimes.set(event.detail.elt, performance.now());
+
             // For aggress forms, set the quantity and fill_and_kill from controls
             if (event.detail.elt.classList && event.detail.elt.classList.contains('aggress-form')) {
                 const qtyInput = event.detail.elt.querySelector('.aggress-qty');
@@ -322,6 +349,17 @@
             const button = event.detail.elt.querySelector('button[type="submit"]');
             if (button) {
                 button.disabled = false;
+            }
+
+            // Log round-trip timing
+            const startTime = htmxRequestTimes.get(event.detail.elt);
+            if (startTime) {
+                htmxRequestTimes.delete(event.detail.elt);
+                const xhr = event.detail.xhr;
+                const serverTime = xhr ? xhr.getResponseHeader('X-Process-Time-Ms') : null;
+                logTiming('HTMX round-trip', startTime,
+                    'path=' + (event.detail.pathInfo ? event.detail.pathInfo.requestPath : 'unknown') +
+                    (serverTime ? ', server=' + serverTime + 'ms' : ''));
             }
 
             // Check for custom headers with toast messages

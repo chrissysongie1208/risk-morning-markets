@@ -1,5 +1,7 @@
 """Main FastAPI application for Morning Markets prediction market."""
 
+import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -18,6 +20,16 @@ import matching
 import settlement
 from models import MarketStatus, OrderSide, OrderStatus, OrderWithUser, TradeWithUsers, PositionWithPnL
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("morning-markets")
+
+# Threshold for slow operation warning (in seconds)
+SLOW_OPERATION_THRESHOLD = 0.5
+
 # Template directory
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
@@ -33,6 +45,38 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Morning Markets", lifespan=lifespan)
+
+
+# ============ Request Timing Middleware ============
+
+@app.middleware("http")
+async def timing_middleware(request: Request, call_next):
+    """Log request timing for all HTTP requests.
+
+    Logs slow requests (>500ms) at WARNING level for debugging latency issues.
+    All requests are logged at DEBUG level with their processing time.
+    """
+    start_time = time.perf_counter()
+
+    response = await call_next(request)
+
+    process_time = time.perf_counter() - start_time
+    process_time_ms = process_time * 1000
+
+    # Add timing header to response for frontend debug mode
+    response.headers["X-Process-Time-Ms"] = f"{process_time_ms:.2f}"
+
+    # Log slow requests at WARNING level
+    if process_time > SLOW_OPERATION_THRESHOLD:
+        logger.warning(
+            f"SLOW REQUEST: {request.method} {request.url.path} took {process_time_ms:.2f}ms"
+        )
+    else:
+        logger.debug(
+            f"Request: {request.method} {request.url.path} took {process_time_ms:.2f}ms"
+        )
+
+    return response
 
 
 # ============ Helper Functions ============
@@ -305,6 +349,8 @@ async def place_order(
         )
 
     try:
+        # Log timing for matching engine
+        match_start = time.perf_counter()
         result = await matching.place_order(
             market_id=market_id,
             user_id=user.id,
@@ -312,6 +358,10 @@ async def place_order(
             price=price,
             quantity=quantity
         )
+        match_time = (time.perf_counter() - match_start) * 1000
+
+        if match_time > SLOW_OPERATION_THRESHOLD * 1000:
+            logger.warning(f"SLOW: matching.place_order took {match_time:.2f}ms (user={user.display_name})")
 
         if result.rejected:
             error_msg = result.reject_reason or "Order rejected"
@@ -332,8 +382,19 @@ async def place_order(
         else:
             msg = f"Order placed: {quantity} lots @ {price}"
 
-        # Broadcast update to all WebSocket clients
+        # Broadcast update to all WebSocket clients with timing
+        broadcast_start = time.perf_counter()
         await broadcast_market_update(market_id)
+        broadcast_time = (time.perf_counter() - broadcast_start) * 1000
+
+        if broadcast_time > SLOW_OPERATION_THRESHOLD * 1000:
+            logger.warning(f"SLOW: WebSocket broadcast took {broadcast_time:.2f}ms (market={market_id})")
+
+        # Log total operation breakdown for debugging
+        logger.info(
+            f"place_order: match={match_time:.1f}ms, broadcast={broadcast_time:.1f}ms, "
+            f"trades={len(result.trades)}, user={user.display_name}"
+        )
 
         if is_htmx_request(request):
             return HTMLResponse(content="", headers={"HX-Toast-Success": msg})
@@ -476,6 +537,8 @@ async def aggress_order(
     actual_qty = min(quantity, available_qty)
 
     try:
+        # Log timing for aggress matching
+        match_start = time.perf_counter()
         result = await matching.place_order(
             market_id=market_id,
             user_id=user.id,
@@ -483,6 +546,10 @@ async def aggress_order(
             price=aggress_price,
             quantity=actual_qty
         )
+        match_time = (time.perf_counter() - match_start) * 1000
+
+        if match_time > SLOW_OPERATION_THRESHOLD * 1000:
+            logger.warning(f"SLOW: aggress matching took {match_time:.2f}ms (user={user.display_name})")
 
         if result.rejected:
             error_msg = result.reject_reason or "Order rejected"
@@ -495,9 +562,12 @@ async def aggress_order(
 
         # Handle fill-and-kill: cancel any resting order (unfilled portion)
         unfilled_qty = 0
+        cancel_time = 0
         if fill_and_kill and result.order and result.order.remaining_quantity > 0:
+            cancel_start = time.perf_counter()
             unfilled_qty = result.order.remaining_quantity
             await matching.cancel_order(result.order.id, user.id)
+            cancel_time = (time.perf_counter() - cancel_start) * 1000
 
         # Build success message
         if result.trades:
@@ -517,8 +587,19 @@ async def aggress_order(
             else:
                 msg = f"Order placed: {actual_qty} lots @ {aggress_price}"
 
-        # Broadcast update to all WebSocket clients
+        # Broadcast update to all WebSocket clients with timing
+        broadcast_start = time.perf_counter()
         await broadcast_market_update(market_id)
+        broadcast_time = (time.perf_counter() - broadcast_start) * 1000
+
+        if broadcast_time > SLOW_OPERATION_THRESHOLD * 1000:
+            logger.warning(f"SLOW: WebSocket broadcast took {broadcast_time:.2f}ms (market={market_id})")
+
+        # Log total operation breakdown for debugging
+        logger.info(
+            f"aggress_order: match={match_time:.1f}ms, cancel={cancel_time:.1f}ms, "
+            f"broadcast={broadcast_time:.1f}ms, trades={len(result.trades)}, user={user.display_name}"
+        )
 
         if is_htmx_request(request):
             return HTMLResponse(content="", headers={"HX-Toast-Success": msg})

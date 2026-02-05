@@ -4,9 +4,12 @@ Handles:
 - Client connections per market
 - Broadcasting HTML updates to all connected clients
 - Ping/pong keepalive for stale connection detection
+- Timing logging for latency diagnosis
 """
 
 import asyncio
+import logging
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 from collections import defaultdict
@@ -15,8 +18,14 @@ from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 
+# Configure logger
+logger = logging.getLogger("morning-markets.websocket")
+
 # Keepalive interval in seconds
 WEBSOCKET_PING_INTERVAL = 30
+
+# Slow operation threshold in seconds
+SLOW_OPERATION_THRESHOLD = 0.5
 
 
 class ConnectionManager:
@@ -58,14 +67,25 @@ class ConnectionManager:
         if market_id not in self._connections:
             return
 
+        start_time = time.perf_counter()
+
         # Create list copy to avoid modification during iteration
         connections = list(self._connections[market_id])
         disconnected = []
+        sent_count = 0
 
         for websocket, user_id in connections:
             try:
                 if websocket.client_state == WebSocketState.CONNECTED:
+                    send_start = time.perf_counter()
                     await websocket.send_text(message)
+                    send_time = (time.perf_counter() - send_start) * 1000
+                    sent_count += 1
+
+                    if send_time > SLOW_OPERATION_THRESHOLD * 1000:
+                        logger.warning(
+                            f"SLOW: WebSocket send to user {user_id} took {send_time:.2f}ms"
+                        )
             except Exception:
                 # Mark for removal
                 disconnected.append((websocket, user_id))
@@ -73,6 +93,13 @@ class ConnectionManager:
         # Clean up disconnected clients
         for ws, uid in disconnected:
             self.disconnect(ws, market_id, uid)
+
+        total_time = (time.perf_counter() - start_time) * 1000
+        if sent_count > 0:
+            logger.debug(
+                f"WebSocket broadcast: market={market_id}, clients={sent_count}, "
+                f"total_time={total_time:.1f}ms, avg={total_time/sent_count:.1f}ms"
+            )
 
     async def send_personal_update(
         self,
@@ -88,7 +115,14 @@ class ConnectionManager:
             if uid == user_id:
                 try:
                     if websocket.client_state == WebSocketState.CONNECTED:
+                        send_start = time.perf_counter()
                         await websocket.send_text(message)
+                        send_time = (time.perf_counter() - send_start) * 1000
+
+                        if send_time > SLOW_OPERATION_THRESHOLD * 1000:
+                            logger.warning(
+                                f"SLOW: WebSocket personal send to user {user_id} took {send_time:.2f}ms"
+                            )
                 except Exception:
                     self.disconnect(websocket, market_id, uid)
 

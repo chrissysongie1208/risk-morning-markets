@@ -1009,3 +1009,68 @@ Added 4 new tests:
 - `test_fill_and_kill_message_shows_requested_vs_filled` - Message shows requested vs filled amounts
 - `test_fill_and_kill_false_creates_resting_order` - F&K off doesn't say "killed"
 - `test_fill_and_kill_default_is_false` - Default behavior is unchanged
+
+---
+
+## Request Timing / Latency Logging (TODO-042) - 2026-02-05
+
+### Multi-layer timing approach
+To diagnose latency issues effectively, instrument timing at multiple layers:
+
+1. **HTTP middleware**: Catches all request timing, adds `X-Process-Time-Ms` header
+2. **Endpoint-specific timing**: Breaks down into matching engine vs broadcast time
+3. **WebSocket layer**: Tracks time to send messages to each client
+4. **Frontend debug mode**: Measures round-trip time visible to the user
+
+This layered approach helps identify WHERE latency occurs (network, database, code, etc.).
+
+### FastAPI middleware for request timing
+Use `@app.middleware("http")` to wrap all requests with timing:
+
+```python
+@app.middleware("http")
+async def timing_middleware(request: Request, call_next):
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    process_time = time.perf_counter() - start_time
+    response.headers["X-Process-Time-Ms"] = f"{process_time * 1000:.2f}"
+    return response
+```
+
+### Logging slow operations vs all operations
+Use different log levels for different purposes:
+- `logger.warning()` for slow operations (>500ms threshold) - always visible
+- `logger.info()` for operation breakdowns (match time, broadcast time)
+- `logger.debug()` for routine request timing - only visible when debug enabled
+
+This keeps logs clean while still capturing important slow operation warnings.
+
+### Frontend debug mode with localStorage
+Make debug timing opt-in to avoid console spam:
+
+```javascript
+let debugTimingEnabled = localStorage.getItem('debugTiming') === 'true';
+
+window.enableDebugTiming = function(enabled) {
+    debugTimingEnabled = enabled;
+    localStorage.setItem('debugTiming', enabled ? 'true' : 'false');
+};
+
+function logTiming(operation, startTime, details) {
+    if (!debugTimingEnabled) return;
+    const elapsed = performance.now() - startTime;
+    console.log('[TIMING] ' + operation + ': ' + elapsed.toFixed(1) + 'ms', details);
+}
+```
+
+Users can enable with `window.enableDebugTiming(true)` in browser console.
+
+### Correlating frontend and backend timing
+The `X-Process-Time-Ms` header in the response tells the frontend how long the server took. Combined with frontend round-trip measurement, you can calculate:
+- **Server time**: from header
+- **Network time**: round-trip minus server time
+
+This helps distinguish between slow server and slow network issues.
+
+### No test count change
+This was an observability/logging feature with no new tests needed. All 102 existing tests pass unchanged.
