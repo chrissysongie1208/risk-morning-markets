@@ -110,7 +110,7 @@
 
 - [x] TODO-047: **CRITICAL** - Buy/Sell buttons failing due to WebSocket race condition. **ROOT CAUSE**: WebSocket DOM updates were destroying the aggress form mid-submission. When `updateFromWebSocket()` replaced `orderbookTarget.innerHTML`, any form the user just clicked would be destroyed before HTMX could complete the POST. **FIX IMPLEMENTED**: Added client-side "aggress lock" mechanism (Option B from original TODO). When aggress form submission starts, `aggressInProgress` flag is set which prevents WebSocket from updating the orderbook. When submission completes, any pending update is applied. Added 2-second safety timeout. See LESSONS.md for full details. **REQUIRES HUMAN VERIFICATION** - See TODO-048.
 
-- [ ] TODO-048: **HUMAN VERIFICATION REQUIRED** - Test Buy/Sell button fix in production. Test scenarios: (1) Single user clicking Buy/Sell rapidly, (2) Two users trading simultaneously, (3) Network latency simulation. Open browser DevTools console to see `[AGGRESS]` log messages. Expected: >95% success rate, with console showing lock acquire/release pattern. Report back if issues persist - may need to increase lock timeout or try Option A (backend matching engine changes).
+- [?] TODO-048: **HUMAN VERIFICATION REQUIRED** - Test Buy/Sell button fix in production. Test scenarios: (1) Single user clicking Buy/Sell rapidly, (2) Two users trading simultaneously, (3) Network latency simulation. Open browser DevTools console to see `[AGGRESS]` log messages. Expected: >95% success rate, with console showing lock acquire/release pattern. Report back if issues persist - may need to increase lock timeout or try Option A (backend matching engine changes).
 
 ---
 
