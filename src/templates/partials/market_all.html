@@ -25,25 +25,41 @@ Price Ladder: vertical layout with price in center
 - Spread gap in middle
 - Bids (buy orders) at bottom, sorted by price descending (best bid first)
 - Layout: [Action] Bids | PRICE | Offers [Action]
+
+Aggregation: Orders from the SAME user at the SAME price are aggregated into one row
+showing combined quantity. Different users at same price show as separate rows
+(important for queue priority visibility). The Trade/Cancel buttons reference the
+first order in queue priority (oldest).
 #}
 
-{# Build bid lookup by price #}
-{% set bid_by_price = {} %}
-{% for order in bids %}
-    {% if order.price not in bid_by_price %}
-        {% set _ = bid_by_price.update({order.price: []}) %}
+{# Build aggregated offers by user_id + price, preserving time priority #}
+{# Key: (user_id, price), Value: {first_order, total_qty, display_name} #}
+{% set aggregated_offers = {} %}
+{% for order in offers %}
+    {% set key = (order.user_id, order.price) %}
+    {% if key not in aggregated_offers %}
+        {% set _ = aggregated_offers.update({key: {'first_order': order, 'total_qty': order.remaining_quantity, 'display_name': order.display_name}}) %}
+    {% else %}
+        {% set _ = aggregated_offers[key].update({'total_qty': aggregated_offers[key]['total_qty'] + order.remaining_quantity}) %}
     {% endif %}
-    {% set _ = bid_by_price[order.price].append(order) %}
 {% endfor %}
 
-{# Build offer lookup by price #}
-{% set offer_by_price = {} %}
-{% for order in offers %}
-    {% if order.price not in offer_by_price %}
-        {% set _ = offer_by_price.update({order.price: []}) %}
+{# Build aggregated bids by user_id + price, preserving time priority #}
+{% set aggregated_bids = {} %}
+{% for order in bids %}
+    {% set key = (order.user_id, order.price) %}
+    {% if key not in aggregated_bids %}
+        {% set _ = aggregated_bids.update({key: {'first_order': order, 'total_qty': order.remaining_quantity, 'display_name': order.display_name}}) %}
+    {% else %}
+        {% set _ = aggregated_bids[key].update({'total_qty': aggregated_bids[key]['total_qty'] + order.remaining_quantity}) %}
     {% endif %}
-    {% set _ = offer_by_price[order.price].append(order) %}
 {% endfor %}
+
+{# Convert to sorted lists for display #}
+{# Offers: sort by price DESC (highest at top) #}
+{% set offer_rows = aggregated_offers.values()|list|sort(attribute='first_order.price', reverse=true) %}
+{# Bids: sort by price DESC (best bid at top) #}
+{% set bid_rows = aggregated_bids.values()|list|sort(attribute='first_order.price', reverse=true) %}
 
 {# Get best bid and best offer for spread display #}
 {% set best_bid = bids[0].price if bids else none %}
@@ -61,8 +77,9 @@ Price Ladder: vertical layout with price in center
         </tr>
     </thead>
     <tbody>
-        {# Offers section - highest price first (reversed since offers are ASC) #}
-        {% for order in offers|reverse %}
+        {# Offers section - highest price first #}
+        {% for agg in offer_rows %}
+        {% set order = agg['first_order'] %}
         <tr class="ladder-offer-row{% if order.user_id == user.id %} own-order{% endif %}">
             <td class="ladder-action">
                 {# Empty on bid side for offer rows #}
@@ -72,8 +89,8 @@ Price Ladder: vertical layout with price in center
             </td>
             <td class="ladder-price offer">{{ "%.2f"|format(order.price) }}</td>
             <td class="ladder-offer-info">
-                <span class="ladder-qty">{{ order.remaining_quantity }}</span>
-                <span class="ladder-user">{{ order.display_name }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</span>
+                <span class="ladder-qty">{{ agg['total_qty'] }}</span>
+                <span class="ladder-user">{{ agg['display_name'] }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</span>
             </td>
             <td class="ladder-action">
                 {% if order.user_id == user.id and market.status.value == 'OPEN' %}
@@ -108,8 +125,9 @@ Price Ladder: vertical layout with price in center
             </td>
         </tr>
 
-        {# Bids section - highest price first (already DESC) #}
-        {% for order in bids %}
+        {# Bids section - highest price first #}
+        {% for agg in bid_rows %}
+        {% set order = agg['first_order'] %}
         <tr class="ladder-bid-row{% if order.user_id == user.id %} own-order{% endif %}">
             <td class="ladder-action">
                 {% if order.user_id == user.id and market.status.value == 'OPEN' %}
@@ -131,8 +149,8 @@ Price Ladder: vertical layout with price in center
                 {% endif %}
             </td>
             <td class="ladder-bid-info">
-                <span class="ladder-user">{{ order.display_name }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</span>
-                <span class="ladder-qty">{{ order.remaining_quantity }}</span>
+                <span class="ladder-user">{{ agg['display_name'] }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</span>
+                <span class="ladder-qty">{{ agg['total_qty'] }}</span>
             </td>
             <td class="ladder-price bid">{{ "%.2f"|format(order.price) }}</td>
             <td class="ladder-offer-info">

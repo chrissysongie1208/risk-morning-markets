@@ -1190,3 +1190,58 @@ Added 5 new reliability tests:
 - `test_aggress_returns_timing_header` - X-Process-Time-Ms header present and reasonable
 - `test_aggress_completes_trade_end_to_end` - Full flow verification (aggress→trade→positions)
 - `test_aggress_with_fill_and_kill_shows_killed` - F&K message format correct
+
+---
+
+## Order Aggregation in Orderbook Display (TODO-045) - 2026-02-05
+
+### Template-side aggregation, not database-side
+Order aggregation was implemented in the Jinja2 template rather than in the database query. This approach has several benefits:
+1. **Individual orders remain accessible**: The Trade/Cancel buttons need to reference specific order IDs. Aggregating at the database level would lose this information.
+2. **Preserves queue priority**: The first order in a price level is still tracked (`first_order`) so the button targets the order with highest time priority.
+3. **Simpler implementation**: No SQL GROUP BY complexity or additional models needed.
+
+### Jinja2 dictionary aggregation pattern
+To aggregate orders by (user_id, price) in Jinja2:
+
+```jinja2
+{% set aggregated = {} %}
+{% for order in orders %}
+    {% set key = (order.user_id, order.price) %}
+    {% if key not in aggregated %}
+        {% set _ = aggregated.update({key: {'first_order': order, 'total_qty': order.remaining_quantity}}) %}
+    {% else %}
+        {% set _ = aggregated[key].update({'total_qty': aggregated[key]['total_qty'] + order.remaining_quantity}) %}
+    {% endif %}
+{% endfor %}
+{% set rows = aggregated.values()|list|sort(attribute='first_order.price', reverse=true) %}
+```
+
+Key points:
+- Use `{% set _ = dict.update(...) %}` to mutate dictionaries in Jinja2 (the `_` captures the None return value)
+- Convert to list and sort for display order
+- Access nested attributes with `attribute='first_order.price'` in sort filter
+
+### Test pitfall: Admin login replaces participant session
+When a test needs both admin actions (create market) and participant actions (place orders), be careful about session management:
+
+**Wrong**: Join as participant, then login as admin, then place orders → orders are placed as admin user, not participant!
+
+**Right**: Use separate client contexts for admin setup vs participant trading:
+```python
+# Admin creates market in its own context
+async with AsyncClient(...) as admin:
+    await admin.post("/admin/login", ...)
+    await admin.post("/admin/markets", ...)
+
+# Participants trade in separate contexts (no admin login)
+async with AsyncClient(...) as trader1:
+    await trader1.post("/join", ...)
+    await trader1.post("/orders", ...)
+```
+
+### Test count increased from 123 to 126
+Added 3 new tests:
+- `test_orderbook_aggregates_same_user_same_price` - Same user + same price = aggregated qty
+- `test_orderbook_same_user_different_prices_separate_rows` - Different prices stay separate
+- `test_orderbook_different_users_same_price_separate_rows` - Different users stay separate

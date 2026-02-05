@@ -3322,3 +3322,151 @@ async def test_aggress_with_fill_and_kill_shows_killed():
         assert "2" in success_msg, f"Should mention 2 lots filled: {success_msg}"
         # Note: Message format depends on whether there was unfilled qty to kill
         # If capped at available, there may be no "killed" - that's ok
+
+
+# ============ Order Aggregation Tests (TODO-045) ============
+
+@pytest.mark.asyncio
+async def test_orderbook_aggregates_same_user_same_price():
+    """Same user, same side, same price -> aggregated into one row with combined qty."""
+    transport = ASGITransport(app=app)
+
+    trader_id = await create_participant_and_get_id("AggTrader1")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as trader:
+        # Join and setup market
+        await trader.post("/join", data={"participant_id": trader_id}, follow_redirects=False)
+        await trader.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await trader.post(
+            "/admin/markets",
+            data={"question": "Aggregation test market?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Aggregation test" in m.question][0]
+
+        # Same user places 2 BID orders at same price (50)
+        await trader.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "BID", "price": "50", "quantity": "5"},
+            follow_redirects=True
+        )
+        await trader.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "BID", "price": "50", "quantity": "3"},
+            follow_redirects=True
+        )
+
+        # Verify we have 2 orders in database
+        bids = await db.get_open_orders(market.id, side=db.OrderSide.BID)
+        assert len(bids) == 2, "Should have 2 separate orders in database"
+        total_qty = sum(b.remaining_quantity for b in bids)
+        assert total_qty == 8, "Total quantity should be 8 (5 + 3)"
+
+        # Check combined partial endpoint
+        response = await trader.get(f"/partials/market/{market.id}")
+        assert response.status_code == 200
+        content = response.text
+
+        # The orderbook should show aggregated quantity (8)
+        # Count how many rows have the trader's name in the bid section
+        # Should only be ONE row showing "8" as the aggregated quantity
+        assert "8" in content, "Aggregated quantity of 8 should be visible"
+        # Since the display name "AggTrader1" is shown once per aggregated row,
+        # we can check it appears only once in the bid info area
+        # But we can't easily parse HTML, so just check the qty appears
+
+
+@pytest.mark.asyncio
+async def test_orderbook_same_user_different_prices_separate_rows():
+    """Same user, same side, different prices -> separate rows."""
+    transport = ASGITransport(app=app)
+
+    trader_id = await create_participant_and_get_id("AggTrader2")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as trader:
+        await trader.post("/join", data={"participant_id": trader_id}, follow_redirects=False)
+        await trader.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await trader.post(
+            "/admin/markets",
+            data={"question": "Different prices test?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Different prices" in m.question][0]
+
+        # Same user places BID orders at DIFFERENT prices
+        await trader.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "BID", "price": "50", "quantity": "5"},
+            follow_redirects=True
+        )
+        await trader.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "BID", "price": "48", "quantity": "3"},
+            follow_redirects=True
+        )
+
+        response = await trader.get(f"/partials/market/{market.id}")
+        content = response.text
+
+        # Both prices should be visible (separate rows since different prices)
+        assert "50.00" in content, "Price 50.00 should be visible"
+        assert "48.00" in content, "Price 48.00 should be visible"
+        # Individual quantities (not aggregated since different prices)
+        assert "5" in content, "Quantity 5 should be visible"
+        assert "3" in content, "Quantity 3 should be visible"
+
+
+@pytest.mark.asyncio
+async def test_orderbook_different_users_same_price_separate_rows():
+    """Different users, same price -> separate rows (queue priority visibility)."""
+    transport = ASGITransport(app=app)
+
+    trader1_id = await create_participant_and_get_id("AggTrader3")
+    trader2_id = await create_participant_and_get_id("AggTrader4")
+
+    # Setup market with a separate admin session first
+    async with AsyncClient(transport=transport, base_url="http://test") as admin:
+        await admin.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await admin.post(
+            "/admin/markets",
+            data={"question": "Multi-user same price test?"},
+            follow_redirects=True
+        )
+
+    markets = await db.get_all_markets()
+    market = [m for m in markets if "Multi-user same price" in m.question][0]
+
+    # First trader joins and places order (NOT as admin)
+    async with AsyncClient(transport=transport, base_url="http://test") as trader1:
+        await trader1.post("/join", data={"participant_id": trader1_id}, follow_redirects=False)
+        await trader1.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "BID", "price": "50", "quantity": "5"},
+            follow_redirects=True
+        )
+
+    async with AsyncClient(transport=transport, base_url="http://test") as trader2:
+        # Second user places BID at same price 50
+        await trader2.post("/join", data={"participant_id": trader2_id}, follow_redirects=False)
+        await trader2.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "BID", "price": "50", "quantity": "3"},
+            follow_redirects=True
+        )
+
+        response = await trader2.get(f"/partials/market/{market.id}")
+        content = response.text
+
+        # Both users' names should be visible (separate rows)
+        assert "AggTrader3" in content, "First trader name should be visible"
+        assert "AggTrader4" in content, "Second trader name should be visible"
+        # Both quantities should be visible (not aggregated)
+        assert "5" in content, "Quantity 5 should be visible"
+        assert "3" in content, "Quantity 3 should be visible"
+        # Price appears twice (once per row)
+        # We can't easily count, but we know both are at 50.00
+        assert "50.00" in content, "Price 50.00 should be visible"

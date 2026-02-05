@@ -1,5 +1,32 @@
 {# Standalone orderbook partial (deprecated - use market_all.html instead) #}
 {# Price Ladder Layout - vertical with price in center #}
+{# Aggregation: Same user + same price = aggregated row with combined quantity #}
+
+{# Build aggregated offers by user_id + price, preserving time priority #}
+{% set aggregated_offers = {} %}
+{% for order in offers %}
+    {% set key = (order.user_id, order.price) %}
+    {% if key not in aggregated_offers %}
+        {% set _ = aggregated_offers.update({key: {'first_order': order, 'total_qty': order.remaining_quantity, 'display_name': order.display_name}}) %}
+    {% else %}
+        {% set _ = aggregated_offers[key].update({'total_qty': aggregated_offers[key]['total_qty'] + order.remaining_quantity}) %}
+    {% endif %}
+{% endfor %}
+
+{# Build aggregated bids by user_id + price, preserving time priority #}
+{% set aggregated_bids = {} %}
+{% for order in bids %}
+    {% set key = (order.user_id, order.price) %}
+    {% if key not in aggregated_bids %}
+        {% set _ = aggregated_bids.update({key: {'first_order': order, 'total_qty': order.remaining_quantity, 'display_name': order.display_name}}) %}
+    {% else %}
+        {% set _ = aggregated_bids[key].update({'total_qty': aggregated_bids[key]['total_qty'] + order.remaining_quantity}) %}
+    {% endif %}
+{% endfor %}
+
+{# Convert to sorted lists for display #}
+{% set offer_rows = aggregated_offers.values()|list|sort(attribute='first_order.price', reverse=true) %}
+{% set bid_rows = aggregated_bids.values()|list|sort(attribute='first_order.price', reverse=true) %}
 
 {# Get best bid and best offer for spread display #}
 {% set best_bid = bids[0].price if bids else none %}
@@ -17,8 +44,9 @@
         </tr>
     </thead>
     <tbody>
-        {# Offers section - highest price first (reversed since offers are ASC) #}
-        {% for order in offers|reverse %}
+        {# Offers section - highest price first #}
+        {% for agg in offer_rows %}
+        {% set order = agg['first_order'] %}
         <tr class="ladder-offer-row{% if order.user_id == user.id %} own-order{% endif %}">
             <td class="ladder-action">
                 {# Empty on bid side for offer rows #}
@@ -28,8 +56,8 @@
             </td>
             <td class="ladder-price offer">{{ "%.2f"|format(order.price) }}</td>
             <td class="ladder-offer-info">
-                <span class="ladder-qty">{{ order.remaining_quantity }}</span>
-                <span class="ladder-user">{{ order.display_name }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</span>
+                <span class="ladder-qty">{{ agg['total_qty'] }}</span>
+                <span class="ladder-user">{{ agg['display_name'] }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</span>
             </td>
             <td class="ladder-action">
                 {% if order.user_id == user.id and market.status.value == 'OPEN' %}
@@ -64,8 +92,9 @@
             </td>
         </tr>
 
-        {# Bids section - highest price first (already DESC) #}
-        {% for order in bids %}
+        {# Bids section - highest price first #}
+        {% for agg in bid_rows %}
+        {% set order = agg['first_order'] %}
         <tr class="ladder-bid-row{% if order.user_id == user.id %} own-order{% endif %}">
             <td class="ladder-action">
                 {% if order.user_id == user.id and market.status.value == 'OPEN' %}
@@ -87,8 +116,8 @@
                 {% endif %}
             </td>
             <td class="ladder-bid-info">
-                <span class="ladder-user">{{ order.display_name }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</span>
-                <span class="ladder-qty">{{ order.remaining_quantity }}</span>
+                <span class="ladder-user">{{ agg['display_name'] }}{% if order.user_id == user.id %} <small>(you)</small>{% endif %}</span>
+                <span class="ladder-qty">{{ agg['total_qty'] }}</span>
             </td>
             <td class="ladder-price bid">{{ "%.2f"|format(order.price) }}</td>
             <td class="ladder-offer-info">
