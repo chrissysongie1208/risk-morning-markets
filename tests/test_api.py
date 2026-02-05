@@ -1944,3 +1944,56 @@ async def test_aggress_partial_fill():
     # Check order is fully filled
     offer_after = await db.get_order(offer_id)
     assert offer_after.remaining_quantity == 0
+
+
+@pytest.mark.asyncio
+async def test_aggress_htmx_returns_toast_success():
+    """POST /orders/{id}/aggress with HX-Request header returns HX-Toast-Success header."""
+    transport = ASGITransport(app=app)
+
+    # Create two participants
+    seller_id = await create_participant_and_get_id("AggressHTMXSeller")
+    buyer_id = await create_participant_and_get_id("AggressHTMXBuyer")
+
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+
+        # Admin creates a market
+        await seller.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await seller.post(
+            "/admin/markets",
+            data={"question": "Aggress HTMX test?"},
+            follow_redirects=True
+        )
+
+        markets = await db.get_all_markets()
+        market = [m for m in markets if "Aggress HTMX" in m.question][0]
+
+        # Seller places offer
+        await seller.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "50", "quantity": "5"},
+            follow_redirects=True
+        )
+
+    offers = await db.get_open_orders(market.id, side=db.OrderSide.OFFER)
+    offer_id = offers[0].id
+
+    # Buyer aggresses the offer via HTMX
+    async with AsyncClient(transport=transport, base_url="http://test") as buyer:
+        await buyer.post("/join", data={"participant_id": buyer_id}, follow_redirects=False)
+
+        response = await buyer.post(
+            f"/orders/{offer_id}/aggress",
+            data={"quantity": "2"},
+            follow_redirects=False,
+            headers={"HX-Request": "true"}
+        )
+
+        # Should return 200 with toast header
+        assert response.status_code == 200
+        assert "HX-Toast-Success" in response.headers
+        success_msg = response.headers["HX-Toast-Success"]
+        # Should contain "Bought" and the price
+        assert "Bought" in success_msg
+        assert "50" in success_msg

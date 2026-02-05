@@ -153,6 +153,10 @@
             const orderbookTarget = document.getElementById('orderbook');
             if (orderbookTarget) {
                 orderbookTarget.innerHTML = newOrderbook.innerHTML;
+                // Re-process HTMX attributes on newly added elements (forms, buttons)
+                if (typeof htmx !== 'undefined') {
+                    htmx.process(orderbookTarget);
+                }
             }
         }
 

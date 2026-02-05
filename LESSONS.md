@@ -911,3 +911,44 @@ When debugging a bug where the backend works but the frontend doesn't show the r
 Added 2 new tests:
 - `test_anti_spoofing_rejection_returns_error_toast` - HTMX request returns HX-Toast-Error header
 - `test_anti_spoofing_rejection_non_htmx_returns_redirect` - Regular form submission redirects with error
+
+---
+
+## Trade Button Bug Fix - WebSocket DOM Updates (TODO-040) - 2026-02-05
+
+### Root cause: HTMX elements not re-processed after WebSocket DOM update
+When WebSocket updates the orderbook via `innerHTML`, the new HTMX elements (forms with `hx-post`) were not being processed by HTMX. The HTMX library needs to scan new elements to attach event handlers and configure behaviors.
+
+```javascript
+// BUG: New elements have hx-post but HTMX doesn't know about them
+orderbookTarget.innerHTML = newOrderbook.innerHTML;
+// Form submissions do nothing because HTMX hasn't processed them
+```
+
+### The fix: Call htmx.process() after innerHTML update
+After updating DOM with new content, call `htmx.process()` on the container element:
+
+```javascript
+orderbookTarget.innerHTML = newOrderbook.innerHTML;
+// Re-process HTMX attributes on newly added elements (forms, buttons)
+if (typeof htmx !== 'undefined') {
+    htmx.process(orderbookTarget);
+}
+```
+
+### Key insight: HTMX only processes elements once
+HTMX processes elements on initial page load or when explicitly told to via `htmx.process()`. When you manually update DOM (via WebSocket, JavaScript, etc.), you must:
+1. Update the innerHTML or appendChild
+2. Call `htmx.process(containerElement)` to initialize HTMX behaviors
+
+This is different from HTMX's own swapping mechanism (`hx-swap-oob`) which automatically processes new content.
+
+### Testing strategy for HTMX bugs
+When HTMX forms/buttons don't work after dynamic DOM updates:
+1. **Check if htmx.process() is called** - Required after manual DOM manipulation
+2. **Verify backend works** - Write tests with `HX-Request: true` header to confirm response format
+3. **Check browser console** - No errors usually means HTMX just doesn't know about the elements
+
+### Test count increased from 97 to 98
+Added 1 new test:
+- `test_aggress_htmx_returns_toast_success` - Verifies aggress endpoint returns HX-Toast-Success header for HTMX requests
