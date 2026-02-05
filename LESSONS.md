@@ -1245,3 +1245,45 @@ Added 3 new tests:
 - `test_orderbook_aggregates_same_user_same_price` - Same user + same price = aggregated qty
 - `test_orderbook_same_user_different_prices_separate_rows` - Different prices stay separate
 - `test_orderbook_different_users_same_price_separate_rows` - Different users stay separate
+
+---
+
+## Queue Priority Display in Orderbook (TODO-046) - 2026-02-05
+
+### Visual display should match fill priority
+The matching engine uses price-time priority: within the same price level, the first order placed gets filled first. The orderbook display should reflect this so traders know their queue position.
+
+For a price ladder layout:
+- **BIDS**: First-to-bid appears at TOP of that price level (closer to spread = first to be filled)
+- **OFFERS**: First-to-offer appears at BOTTOM of that price level (closer to spread = first to be filled)
+
+This is because the spread gap separates bids and offers, and being "closer to spread" visually indicates higher fill priority.
+
+### Jinja2 stable sort for multi-key ordering
+Jinja2's `sort` filter is stable, meaning equal elements maintain their relative order. To achieve multi-key sorting (like SQL's `ORDER BY price DESC, created_at ASC`), apply sorts in reverse priority order:
+
+```jinja2
+{# For bids: sort by created_at ASC first, then by price DESC #}
+{# The second sort (price) is stable, preserving created_at order within same price #}
+{% set bid_rows = data|sort(attribute='created_at')|sort(attribute='price', reverse=true) %}
+
+{# For offers: sort by created_at DESC first, then by price DESC #}
+{% set offer_rows = data|sort(attribute='created_at', reverse=true)|sort(attribute='price', reverse=true) %}
+```
+
+Key insight: The **last** sort applied is the primary sort key. Earlier sorts establish the tie-breaking order for equal primary keys.
+
+### Database query already provides correct order
+The `get_open_orders()` function in `database.py` already sorts by `created_at ASC` within each price level:
+```python
+# ORDER BY price DESC, created_at ASC  (for bids)
+# ORDER BY price ASC, created_at ASC   (for offers)
+```
+
+The issue was in the template aggregation logic, which was only sorting by price after aggregation, losing the time priority information within price levels.
+
+### Test count increased from 126 to 129
+Added 3 new tests:
+- `test_queue_priority_bids_first_bidder_at_top` - First bidder at same price appears first in HTML
+- `test_queue_priority_offers_first_offerer_at_bottom` - First offerer at same price appears last in HTML (bottom of price level)
+- `test_queue_priority_matches_fill_order` - Verifies that the first bidder actually gets filled first (matching engine confirmation)

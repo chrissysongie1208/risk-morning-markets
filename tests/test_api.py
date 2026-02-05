@@ -3470,3 +3470,188 @@ async def test_orderbook_different_users_same_price_separate_rows():
         # Price appears twice (once per row)
         # We can't easily count, but we know both are at 50.00
         assert "50.00" in content, "Price 50.00 should be visible"
+
+
+# ============ Queue Priority Display Tests (TODO-046) ============
+
+@pytest.mark.asyncio
+async def test_queue_priority_bids_first_bidder_at_top():
+    """For BIDS at same price, first-in-queue appears at TOP (closer to spread).
+
+    This verifies that time priority is correctly displayed:
+    - The first person to bid at price X should appear at the TOP of that price level
+    - This matches fill priority (price-time priority matching)
+    """
+    transport = ASGITransport(app=app)
+
+    trader1_id = await create_participant_and_get_id("QueueBidFirst")
+    trader2_id = await create_participant_and_get_id("QueueBidSecond")
+
+    # Setup market with a separate admin session first
+    async with AsyncClient(transport=transport, base_url="http://test") as admin:
+        await admin.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await admin.post(
+            "/admin/markets",
+            data={"question": "Queue priority bid test?"},
+            follow_redirects=True
+        )
+
+    markets = await db.get_all_markets()
+    market = [m for m in markets if "Queue priority bid" in m.question][0]
+
+    # First trader joins and places BID (will have earlier created_at)
+    async with AsyncClient(transport=transport, base_url="http://test") as trader1:
+        await trader1.post("/join", data={"participant_id": trader1_id}, follow_redirects=False)
+        await trader1.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "BID", "price": "50", "quantity": "5"},
+            follow_redirects=True
+        )
+
+    # Second trader places BID at same price (will have later created_at)
+    async with AsyncClient(transport=transport, base_url="http://test") as trader2:
+        await trader2.post("/join", data={"participant_id": trader2_id}, follow_redirects=False)
+        await trader2.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "BID", "price": "50", "quantity": "3"},
+            follow_redirects=True
+        )
+
+        response = await trader2.get(f"/partials/market/{market.id}")
+        content = response.text
+
+        # Both names should be visible
+        assert "QueueBidFirst" in content, "First bidder name should be visible"
+        assert "QueueBidSecond" in content, "Second bidder name should be visible"
+
+        # First bidder should appear BEFORE second bidder in the HTML
+        # (since they are at the same price level, first-in-queue should be at TOP)
+        first_bidder_pos = content.find("QueueBidFirst")
+        second_bidder_pos = content.find("QueueBidSecond")
+
+        assert first_bidder_pos < second_bidder_pos, \
+            "First bidder should appear before (above) second bidder in the orderbook"
+
+
+@pytest.mark.asyncio
+async def test_queue_priority_offers_first_offerer_at_bottom():
+    """For OFFERS at same price, first-in-queue appears at BOTTOM (closer to spread).
+
+    This verifies that time priority is correctly displayed:
+    - The first person to offer at price X should appear at the BOTTOM of that price level
+    - Since offers are displayed from highest to lowest price, bottom = closer to spread
+    - This matches fill priority (price-time priority matching)
+    """
+    transport = ASGITransport(app=app)
+
+    trader1_id = await create_participant_and_get_id("QueueOfferFirst")
+    trader2_id = await create_participant_and_get_id("QueueOfferSecond")
+
+    # Setup market with a separate admin session first
+    async with AsyncClient(transport=transport, base_url="http://test") as admin:
+        await admin.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await admin.post(
+            "/admin/markets",
+            data={"question": "Queue priority offer test?"},
+            follow_redirects=True
+        )
+
+    markets = await db.get_all_markets()
+    market = [m for m in markets if "Queue priority offer" in m.question][0]
+
+    # First trader joins and places OFFER (will have earlier created_at)
+    async with AsyncClient(transport=transport, base_url="http://test") as trader1:
+        await trader1.post("/join", data={"participant_id": trader1_id}, follow_redirects=False)
+        await trader1.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "55", "quantity": "5"},
+            follow_redirects=True
+        )
+
+    # Second trader places OFFER at same price (will have later created_at)
+    async with AsyncClient(transport=transport, base_url="http://test") as trader2:
+        await trader2.post("/join", data={"participant_id": trader2_id}, follow_redirects=False)
+        await trader2.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "55", "quantity": "3"},
+            follow_redirects=True
+        )
+
+        response = await trader2.get(f"/partials/market/{market.id}")
+        content = response.text
+
+        # Both names should be visible
+        assert "QueueOfferFirst" in content, "First offerer name should be visible"
+        assert "QueueOfferSecond" in content, "Second offerer name should be visible"
+
+        # First offerer should appear AFTER second offerer in the HTML
+        # (since they are at the same price level, first-in-queue should be at BOTTOM = closer to spread)
+        first_offerer_pos = content.find("QueueOfferFirst")
+        second_offerer_pos = content.find("QueueOfferSecond")
+
+        assert first_offerer_pos > second_offerer_pos, \
+            "First offerer should appear after (below) second offerer in the orderbook"
+
+
+@pytest.mark.asyncio
+async def test_queue_priority_matches_fill_order():
+    """Verify that display order matches actual fill priority.
+
+    When two users have bids at the same price, the first bidder
+    should be filled first. The display should reflect this.
+    """
+    transport = ASGITransport(app=app)
+
+    bidder1_id = await create_participant_and_get_id("QueueFillFirst")
+    bidder2_id = await create_participant_and_get_id("QueueFillSecond")
+    seller_id = await create_participant_and_get_id("QueueSeller")
+
+    # Setup market with admin
+    async with AsyncClient(transport=transport, base_url="http://test") as admin:
+        await admin.post("/admin/login", data={"username": "chrson", "password": "optiver"})
+        await admin.post(
+            "/admin/markets",
+            data={"question": "Queue fill priority test?"},
+            follow_redirects=True
+        )
+
+    markets = await db.get_all_markets()
+    market = [m for m in markets if "Queue fill priority" in m.question][0]
+
+    # First bidder places bid
+    async with AsyncClient(transport=transport, base_url="http://test") as bidder1:
+        await bidder1.post("/join", data={"participant_id": bidder1_id}, follow_redirects=False)
+        await bidder1.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "BID", "price": "50", "quantity": "3"},
+            follow_redirects=True
+        )
+
+    # Second bidder places bid at same price
+    async with AsyncClient(transport=transport, base_url="http://test") as bidder2:
+        await bidder2.post("/join", data={"participant_id": bidder2_id}, follow_redirects=False)
+        await bidder2.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "BID", "price": "50", "quantity": "3"},
+            follow_redirects=True
+        )
+
+    # Seller places offer at the bid price (should fill with FIRST bidder)
+    async with AsyncClient(transport=transport, base_url="http://test") as seller:
+        await seller.post("/join", data={"participant_id": seller_id}, follow_redirects=False)
+        await seller.post(
+            f"/markets/{market.id}/orders",
+            data={"side": "OFFER", "price": "50", "quantity": "3"},
+            follow_redirects=True
+        )
+
+        # Get trades - the first bidder should be the buyer
+        trades = await db.get_recent_trades(market.id)
+        assert len(trades) == 1, "Should have exactly 1 trade"
+
+        # Get the buyer
+        buyer = await db.get_user_by_id(trades[0].buyer_id)
+
+        # The first bidder (QueueFillFirst) should have been filled first
+        assert buyer.display_name == "QueueFillFirst", \
+            "First bidder should be filled first due to time priority"

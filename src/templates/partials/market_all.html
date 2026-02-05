@@ -56,10 +56,24 @@ first order in queue priority (oldest).
 {% endfor %}
 
 {# Convert to sorted lists for display #}
-{# Offers: sort by price DESC (highest at top) #}
-{% set offer_rows = aggregated_offers.values()|list|sort(attribute='first_order.price', reverse=true) %}
-{# Bids: sort by price DESC (best bid at top) #}
-{% set bid_rows = aggregated_bids.values()|list|sort(attribute='first_order.price', reverse=true) %}
+{#
+Queue Priority Display Logic:
+- Orders are sorted by price (best price first for each side)
+- Within same price level, orders are sorted by time (first-in-first-out)
+- BIDS: First person to bid at price X appears at TOP of that price level (closer to spread)
+- OFFERS: First person to offer at price X appears at BOTTOM of that price level (closer to spread)
+This reflects actual fill priority - the matching engine uses price-time priority.
+#}
+
+{# Offers: sort by price DESC (highest at top), then by created_at DESC (oldest at bottom of same price) #}
+{# This means first-to-offer is at bottom of each price level = closer to spread #}
+{% set offer_rows_unsorted = aggregated_offers.values()|list %}
+{% set offer_rows = offer_rows_unsorted|sort(attribute='first_order.created_at', reverse=true)|sort(attribute='first_order.price', reverse=true) %}
+
+{# Bids: sort by price DESC (best bid at top), then by created_at ASC (oldest at top of same price) #}
+{# This means first-to-bid is at top of each price level = closer to spread #}
+{% set bid_rows_unsorted = aggregated_bids.values()|list %}
+{% set bid_rows = bid_rows_unsorted|sort(attribute='first_order.created_at')|sort(attribute='first_order.price', reverse=true) %}
 
 {# Get best bid and best offer for spread display #}
 {% set best_bid = bids[0].price if bids else none %}
