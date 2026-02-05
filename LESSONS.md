@@ -1074,3 +1074,53 @@ This helps distinguish between slow server and slow network issues.
 
 ### No test count change
 This was an observability/logging feature with no new tests needed. All 102 existing tests pass unchanged.
+
+---
+
+## Comprehensive Test Coverage Improvements (TODO-043) - 2026-02-05
+
+### Testing error message delivery (HX-Toast headers)
+Tests should verify that ALL rejection scenarios return proper `HX-Toast-Error` headers for HTMX requests. Create explicit tests for each scenario:
+- Position limit exceeded
+- Market closed/not open
+- Invalid order side/price/quantity
+- Cancel non-existent order
+- Cancel other user's order
+- Aggress with zero quantity
+- Session expired
+
+Each test should:
+1. Set up the rejection condition
+2. Make request with `headers={"HX-Request": "true"}`
+3. Assert `response.status_code == 200` (not 4xx)
+4. Assert `"HX-Toast-Error" in response.headers`
+5. Assert the error message contains relevant keywords
+
+### Full flow integration tests
+Test complete user flows, not just individual endpoints:
+1. **Place order → verify in orderbook**: Assert order appears with correct price/quantity
+2. **Aggress → verify trade**: Assert trade shows correct buyer/seller IDs
+3. **Trade → verify positions**: Assert positions updated correctly (buyer +qty, seller -qty)
+4. **Settlement → verify P&L**: Assert P&L calculations are correct and zero-sum
+
+Key insight: Get user IDs from database objects (orders, trades) rather than looking up by name, which can fail when multiple tests create users with similar names.
+
+### Concurrent access tests document known limitations
+For concurrent tests where race conditions are expected (e.g., two users aggressing same order simultaneously):
+1. **Document the limitation** in the test docstring
+2. **Test for safety**, not perfect behavior (system doesn't crash, no HTTP errors)
+3. **Assert what IS guaranteed** (at least some trades happen, requests complete)
+4. **Log outcomes** for visibility into race condition behavior
+5. **Don't assert impossible guarantees** (e.g., total filled <= available without DB locking)
+
+### Test isolation issues
+When tests look up users/orders by name, they can fail if multiple tests run in sequence and create entities with overlapping names. Solutions:
+1. Use IDs directly from created objects: `order.user_id` instead of `get_user_by_name("Seller")`
+2. Use unique names per test: `f"UniqueTestName_{test_function_name}"`
+3. Trust database cleanup between tests (TRUNCATE CASCADE)
+
+### Test count increased from 102 to 118
+Added 16 new tests covering:
+- 9 error message delivery tests (position limit, market closed, invalid inputs, cancel scenarios, aggress scenarios, session expired)
+- 2 full flow integration tests (order→trade→verify, multiple trades→settlement→P&L)
+- 5 edge case tests (concurrent aggress, aggress on closed market, cancel already cancelled, session expired for different endpoints)
