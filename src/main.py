@@ -94,6 +94,15 @@ def set_session_cookie(response: RedirectResponse, token: str) -> RedirectRespon
     return response
 
 
+# ============ Debug Endpoint ============
+
+@app.get("/debug/ping")
+async def debug_ping():
+    """Simple endpoint to verify server is running and accepting requests."""
+    logger.warning("DEBUG PING RECEIVED")
+    return {"status": "ok", "message": "Server is running"}
+
+
 # ============ Landing Page ============
 
 @app.get("/", response_class=HTMLResponse)
@@ -479,6 +488,13 @@ async def aggress_order(
 
     If fill_and_kill is True, any unfilled quantity is cancelled (no resting order).
     """
+    # VERY PROMINENT LOG - This should appear in Render logs if request arrives
+    logger.warning(f"========== AGGRESS REQUEST RECEIVED ==========")
+    logger.warning(f"order_id={order_id}, quantity={quantity}, fill_and_kill={fill_and_kill}")
+    logger.warning(f"HX-Request header: {request.headers.get('HX-Request')}")
+    logger.warning(f"session cookie present: {session is not None}")
+    logger.warning(f"===============================================")
+
     endpoint_start = time.perf_counter()
 
     # Auth check with timing

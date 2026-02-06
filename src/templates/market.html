@@ -200,6 +200,7 @@
 
     // ============ DOM Updates ============
     function updateFromWebSocket(html) {
+        console.log('[WS DEBUG] updateFromWebSocket called, aggressInProgress:', aggressInProgress);
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
@@ -371,22 +372,33 @@
 
     function setupHTMXEventHandlers() {
         document.body.addEventListener('htmx:beforeRequest', function(event) {
+            // DEBUG: Log every htmx:beforeRequest event
+            console.log('[HTMX DEBUG] htmx:beforeRequest fired', {
+                elt: event.detail.elt,
+                tagName: event.detail.elt ? event.detail.elt.tagName : 'null',
+                classList: event.detail.elt ? event.detail.elt.className : 'null',
+                hasAggressClass: event.detail.elt && event.detail.elt.classList && event.detail.elt.classList.contains('aggress-form')
+            });
+
             // Record start time for timing measurement
             htmxRequestTimes.set(event.detail.elt, performance.now());
 
             // For aggress forms, set the quantity and fill_and_kill from controls
             // AND acquire the aggress lock to prevent WebSocket DOM updates
             if (event.detail.elt.classList && event.detail.elt.classList.contains('aggress-form')) {
+                console.log('[HTMX DEBUG] Aggress form detected, acquiring lock and setting values');
                 // Acquire lock to prevent WebSocket from destroying our form mid-submission
                 startAggressLock();
 
                 const qtyInput = event.detail.elt.querySelector('.aggress-qty');
                 if (qtyInput) {
                     qtyInput.value = getClickSize();
+                    console.log('[HTMX DEBUG] Set quantity to:', qtyInput.value);
                 }
                 const fakInput = event.detail.elt.querySelector('.aggress-fak');
                 if (fakInput) {
                     fakInput.value = getFillAndKill() ? 'true' : 'false';
+                    console.log('[HTMX DEBUG] Set fill_and_kill to:', fakInput.value);
                 }
             }
 
@@ -398,6 +410,16 @@
         });
 
         document.body.addEventListener('htmx:afterRequest', function(event) {
+            // DEBUG: Log every htmx:afterRequest event
+            const xhr = event.detail.xhr;
+            console.log('[HTMX DEBUG] htmx:afterRequest fired', {
+                elt: event.detail.elt,
+                successful: event.detail.successful,
+                status: xhr ? xhr.status : 'no xhr',
+                toastSuccess: xhr ? xhr.getResponseHeader('HX-Toast-Success') : null,
+                toastError: xhr ? xhr.getResponseHeader('HX-Toast-Error') : null
+            });
+
             // Re-enable submit button
             const button = event.detail.elt.querySelector('button[type="submit"]');
             if (button) {
@@ -406,6 +428,7 @@
 
             // Release aggress lock if this was an aggress form submission
             if (event.detail.elt.classList && event.detail.elt.classList.contains('aggress-form')) {
+                console.log('[HTMX DEBUG] Releasing aggress lock');
                 releaseAggressLock();
             }
 

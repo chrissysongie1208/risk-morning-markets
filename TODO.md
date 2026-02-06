@@ -110,7 +110,48 @@
 
 - [x] TODO-047: **CRITICAL** - Buy/Sell buttons failing due to WebSocket race condition. **ROOT CAUSE**: WebSocket DOM updates were destroying the aggress form mid-submission. When `updateFromWebSocket()` replaced `orderbookTarget.innerHTML`, any form the user just clicked would be destroyed before HTMX could complete the POST. **FIX IMPLEMENTED**: Added client-side "aggress lock" mechanism (Option B from original TODO). When aggress form submission starts, `aggressInProgress` flag is set which prevents WebSocket from updating the orderbook. When submission completes, any pending update is applied. Added 2-second safety timeout. See LESSONS.md for full details. **REQUIRES HUMAN VERIFICATION** - See TODO-048.
 
-- [?] TODO-048: **HUMAN VERIFICATION REQUIRED** - Test Buy/Sell button fix in production. Test scenarios: (1) Single user clicking Buy/Sell rapidly, (2) Two users trading simultaneously, (3) Network latency simulation. Open browser DevTools console to see `[AGGRESS]` log messages. Expected: >95% success rate, with console showing lock acquire/release pattern. Report back if issues persist - may need to increase lock timeout or try Option A (backend matching engine changes).
+- [ ] TODO-048: **CRITICAL - FIX IS NOT WORKING** - Buy/Sell buttons still broken. Human reports the fix didn't work and they can't see logs. **YOU MUST FIGURE THIS OUT AUTONOMOUSLY - DO NOT ASK FOR HUMAN VERIFICATION.**
+
+    **The previous "aggress lock" fix (TODO-047) did NOT solve the problem.** You need to:
+
+    **1. UNDERSTAND WHY THE FIX FAILED:**
+    - Read the current market.html JavaScript carefully
+    - Trace the ENTIRE flow: button click → htmx:beforeRequest → form submission → server response → DOM update
+    - The "aggress lock" may not be triggering, or there's a different root cause entirely
+    - Don't assume the previous diagnosis was correct
+
+    **2. CREATE YOUR OWN TESTS (don't rely on human testing):**
+    - Write a Playwright or Selenium test that simulates real browser clicks
+    - Or: Create a test HTML page that mimics the HTMX + WebSocket interaction
+    - Or: Add server-side logging that proves whether requests are even arriving
+    - Check Render logs: `https://dashboard.render.com` - are aggress requests hitting the server?
+
+    **3. POSSIBLE ROOT CAUSES TO INVESTIGATE:**
+    - Is the HTMX form even submitting? (htmx:beforeRequest may not fire on dynamically-added forms)
+    - Is htmx.process() being called after WebSocket DOM updates?
+    - Is the quantity field being populated correctly?
+    - Is there a JavaScript error preventing execution?
+    - Is the WebSocket disconnecting/reconnecting and causing issues?
+    - Is HTMX even loaded on the page?
+
+    **4. POSSIBLE FIXES TO TRY (in order of preference):**
+    - **Option A (BEST)**: Refactor backend - create atomic `execute_aggress()` in matching.py that doesn't create intermediate orders. The aggress should: validate → lock target order → execute trade directly → update positions. No `place_order()` call.
+    - **Option B**: Use vanilla JavaScript fetch() instead of HTMX for aggress forms - more control, fewer moving parts
+    - **Option C**: Add explicit click handlers with event.preventDefault() to ensure form submission happens
+    - **Option D**: Debounce/queue WebSocket updates instead of blocking them
+
+    **5. VERIFICATION WITHOUT HUMAN:**
+    - Add server-side counter: log how many aggress requests arrive vs succeed
+    - Deploy and check Render logs yourself
+    - Create automated test that clicks buttons programmatically
+    - If you can't verify it works, the fix isn't done
+
+    **RULES:**
+    - DO NOT mark this complete until you have EVIDENCE it works (server logs, automated tests)
+    - DO NOT ask for human verification - figure it out yourself
+    - DO NOT assume your fix works - prove it
+    - If one approach fails, add a TODO for the next approach and continue
+    - Write findings to OBSERVATIONS.md and LESSONS.md as you investigate
 
 ---
 

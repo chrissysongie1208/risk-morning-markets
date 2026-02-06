@@ -18,7 +18,7 @@ When stuck, write questions here with `Status: PENDING`. Human will answer and c
 ## Questions
 
 ### Q-001 (TODO-048) - 2026-02-05
-**Status**: PENDING
+**Status**: ANSWERED
 **Question**: Please verify the Buy/Sell button fix in production at https://risk-morning-markets.onrender.com
 
 **Context**: TODO-047 implemented a client-side "aggress lock" mechanism to prevent WebSocket DOM updates from destroying the aggress form mid-submission. This was identified as the root cause of the ~80% button failure rate.
@@ -33,4 +33,4 @@ When stuck, write questions here with `Status: PENDING`. Human will answer and c
 - Console shows: `[AGGRESS] Lock acquired` followed by `[AGGRESS] Lock released`
 - If WebSocket update arrives during submission: `[AGGRESS] Deferring orderbook update`
 
-**Answer**: (Please report: success rate, any failures observed, console log patterns)
+**Answer**: i cant see it in Console tab, you will need to figure this one out yourself.

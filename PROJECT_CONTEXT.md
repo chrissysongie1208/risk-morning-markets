@@ -75,3 +75,35 @@ config (key, value)
 When adding database changes:
 - Update schema in `database.py` `init_db()`
 - The app auto-creates tables on startup
+
+---
+
+## Known Issues & Improvement Ideas
+
+Things noticed but not yet addressed. **If you notice something, add it here!**
+
+### Performance
+- [ ] N+1 queries in orderbook rendering (fetches user for each order separately)
+- [ ] WebSocket broadcasts regenerate HTML for each connected client
+- [ ] No database connection pooling optimization
+
+### UX
+- [ ] No mobile-responsive design
+- [ ] No keyboard shortcuts for trading
+- [ ] No dark mode
+
+### Testing
+- [ ] No browser automation tests (Playwright/Selenium) - only AsyncClient
+- [ ] No load testing for concurrent users
+- [ ] Race conditions between WebSocket and user clicks not tested
+
+### Code Quality
+- [ ] Some duplication between `market_detail()` and `partial_market_all()`
+- [ ] Logging is basic - could use structured logging (JSON)
+- [ ] No error monitoring integration (Sentry, etc.)
+
+### Architecture
+- [ ] Aggress creates intermediate order before matching (causes UI flicker)
+- [ ] Session storage is in-memory (won't scale past single dyno)
+
+**Pick any of these up, or add your own observations!**
