@@ -19,26 +19,49 @@ An internal prediction market web app for morning market "games" where:
 | Component | Choice |
 |-----------|--------|
 | Backend | Python 3.10+ / FastAPI |
-| Frontend | HTML + Jinja2 + HTMX (1s polling) |
+| Frontend | HTML + Jinja2 + HTMX + WebSocket |
+| Real-time | WebSocket (primary) + HTMX polling (fallback) |
 | Database | Neon PostgreSQL (free, no expiry) |
-| Hosting | Render.com (free tier) |
-| Tests | pytest + httpx (53 tests) |
+| Hosting | Render.com (free tier, auto-deploy on push) |
+| Tests | pytest + httpx (~129 tests) |
+
+**IMPORTANT**: `requirements.txt` must use `uvicorn[standard]` (not just `uvicorn`) for WebSocket support.
 
 ---
 
 ## Current Features
 
-- [x] Kahoot-style participant joining (display name only)
+- [x] Kahoot-style participant joining (pre-registered names, dropdown selection)
 - [x] Admin login (chrson/optiver)
-- [x] Create/close/settle markets
-- [x] Order book with bids/offers
+- [x] Create/settle markets (single action)
+- [x] Price ladder orderbook with aggregated quantities
 - [x] Auto-matching engine (price-time priority)
 - [x] Position limits (default 20, admin configurable)
-- [x] Self-trade prevention
+- [x] Anti-spoofing (can't cross your own orders)
 - [x] Linear P&L calculation
 - [x] Binary P&L (per-trade lots won/lost)
 - [x] Leaderboard (aggregate across markets)
-- [x] Real-time updates (1s HTMX polling)
+- [x] WebSocket real-time updates (with polling fallback)
+- [x] One-click trading (Buy/Sell buttons on orderbook)
+- [x] Fill-and-Kill option for trades
+- [x] Session exclusivity (one user per participant name)
+
+---
+
+## Recent Changes (Feb 2026)
+
+### Human Interventions (Feb 6)
+- **Fixed WebSocket in production**: Changed `uvicorn` to `uvicorn[standard]` in requirements.txt. Without this, WebSocket returned 404 and app fell back to slow 9-second polling.
+- **Added debug logging**: Server logs "AGGRESS REQUEST RECEIVED" when Buy/Sell clicked. Browser console shows `[HTMX DEBUG]` messages.
+- **Updated documentation**: PROMPT.md, CLAUDE.md restructured for autonomous agent behavior.
+
+### Agent Work (TODO-044 to TODO-048)
+- Added aggress lock mechanism to prevent WebSocket DOM updates during form submission
+- Attempted vanilla JS fetch() replacement for HTMX aggress forms
+- Added extensive timing logs to diagnose latency
+
+### Current Status
+**Buy/Sell buttons still unreliable** - Investigation ongoing. See TODO-049, TODO-050.
 
 ---
 
@@ -82,20 +105,26 @@ When adding database changes:
 
 Things noticed but not yet addressed. **If you notice something, add it here!**
 
+### CRITICAL - Active Issues
+- [ ] **Buy/Sell buttons unreliable** - Clicks often don't register or are slow. Root cause still unknown despite multiple fix attempts. See TODO-050.
+
 ### Performance
 - [ ] N+1 queries in orderbook rendering (fetches user for each order separately)
 - [ ] WebSocket broadcasts regenerate HTML for each connected client
 - [ ] No database connection pooling optimization
+- [x] ~~WebSocket not working~~ - Fixed: use `uvicorn[standard]`
 
 ### UX
 - [ ] No mobile-responsive design
 - [ ] No keyboard shortcuts for trading
 - [ ] No dark mode
+- [ ] No mute button for trade sounds
 
 ### Testing
 - [ ] No browser automation tests (Playwright/Selenium) - only AsyncClient
 - [ ] No load testing for concurrent users
 - [ ] Race conditions between WebSocket and user clicks not tested
+- [ ] Can't test real DOM/JS interactions with current test setup
 
 ### Code Quality
 - [ ] Some duplication between `market_detail()` and `partial_market_all()`
@@ -105,5 +134,6 @@ Things noticed but not yet addressed. **If you notice something, add it here!**
 ### Architecture
 - [ ] Aggress creates intermediate order before matching (causes UI flicker)
 - [ ] Session storage is in-memory (won't scale past single dyno)
+- [ ] HTMX + WebSocket + dynamic DOM updates = complex interaction that's hard to debug
 
 **Pick any of these up, or add your own observations!**

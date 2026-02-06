@@ -120,5 +120,15 @@
 
 - [x] TODO-046: Queue priority display in orderbook - ensure time priority is visually clear. Orders should be displayed showing queue priority (first-in-first-out within same price level). For BIDS: the first person to bid at price X should appear at the TOP of that price level's orders. For OFFERS: the first person to offer at price X should appear at the BOTTOM of that price level's orders. This reflects actual fill priority - the matching engine uses price-time priority, so the display should match. Verify the SQL query uses `ORDER BY created_at ASC` within each price level. Update orderbook template if needed. Add test that verifies display order matches fill priority.
 
+---
+
+## CRITICAL - Ongoing Issues (Feb 6)
+
+- [ ] TODO-049: **WebSocket was broken in production** - Human investigation found `requirements.txt` had `uvicorn>=0.24.0` but needed `uvicorn[standard]>=0.24.0` for WebSocket support. Render logs showed "No supported WebSocket library detected" and `/ws/market/...` returned 404. **FIX DEPLOYED by human**: Changed to `uvicorn[standard]`. Verify: (1) Connection indicator shows "Live" not "Polling", (2) WebSocket endpoint no longer returns 404 in Render logs, (3) Real-time updates work without 9-second delays.
+
+- [ ] TODO-050: **Buy/Sell buttons - continued investigation** - Despite TODO-048 claiming fix with vanilla JS fetch(), human reports buttons still not working reliably. Possible issues: (1) The vanilla JS fix may not have been deployed correctly, (2) WebSocket being broken (TODO-049) may have been the real cause, (3) There may be multiple overlapping issues. **INVESTIGATION STEPS**: (a) Check if `executeAggress()` function exists in deployed market.html, (b) Check browser console for `[HTMX DEBUG]` or `[AGGRESS]` logs when clicking, (c) Check Render server logs for "AGGRESS REQUEST RECEIVED" when clicking, (d) If requests aren't reaching server, the issue is client-side JS. If requests reach server but fail, issue is server-side. **DO NOT mark complete without human confirmation that buttons work >95% of the time.**
+
+- [ ] TODO-051: **Add LESSONS.md entry for WebSocket library issue** - Document that `uvicorn` alone doesn't include WebSocket support - must use `uvicorn[standard]`. This caused production WebSocket to fail silently with 404, falling back to slow polling. Future projects should always use `uvicorn[standard]` when WebSocket is needed.
+
 <!-- Add new TODOs here with sequential IDs -->
 
