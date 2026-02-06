@@ -502,9 +502,18 @@
         });
 
         // Handle position changes from HTMX polling (fallback mode)
+        // Also re-attach aggress handlers after any DOM swap
         document.body.addEventListener('htmx:afterSwap', function(event) {
-            if (!event.detail.target || event.detail.target.id !== 'position-content') return;
-            checkPositionChange();
+            // Check for position changes
+            if (event.detail.target && event.detail.target.id === 'position-content') {
+                checkPositionChange();
+            }
+
+            // Re-attach aggress handlers after any swap that might affect orderbook
+            // This is crucial for fallback polling mode when WebSocket is unavailable
+            // The orderbook is updated via hx-swap-oob, so the target might be position-content
+            // but the orderbook also gets updated in the same response
+            attachAggressHandlers();
         });
     }
 

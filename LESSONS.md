@@ -1495,3 +1495,95 @@ Since automated tests can't test browser DOM behavior:
 - Dynamically-added forms (created by WebSocket, polling, etc.)
 - Forms that need precise timing control
 - When HTMX's event chain is unreliable
+
+---
+
+## Production Infrastructure Debugging (Feb 6, 2026)
+
+### CRITICAL: uvicorn[standard] required for WebSocket
+
+**Problem**: WebSocket connections returned 404 in production, app fell back to slow polling (9+ seconds).
+
+**Root cause**: `requirements.txt` had `uvicorn>=0.24.0` but needed `uvicorn[standard]>=0.24.0`.
+
+**The `[standard]` extra includes**:
+- `websockets` - WebSocket protocol support
+- `httptools` - Fast HTTP parsing
+- `uvloop` - Fast event loop (Unix only)
+- `watchfiles` - File watching for reload
+
+**How it was missed**:
+1. Local dev worked fine (probably had websockets installed globally)
+2. Unit tests passed (they use AsyncClient, not real WebSocket)
+3. App "worked" because it silently fell back to polling
+4. No one checked Render logs which showed the error clearly
+
+**Lesson**: When debugging production issues, CHECK INFRASTRUCTURE BEFORE CODE:
+1. Check `/debug/status` endpoint for health checks
+2. Check Render logs for ERROR/WARNING messages
+3. Check `requirements.txt` for missing extras
+4. Don't trust unit tests alone - they don't test real deployment
+
+### Added /debug/status endpoint
+
+Created a comprehensive status endpoint that checks:
+- Database connectivity
+- WebSocket library installed
+- Uvicorn extras
+- Active WebSocket connections
+- Configuration
+
+The agent should ALWAYS check this endpoint when debugging production issues:
+```bash
+curl https://risk-morning-markets.onrender.com/debug/status
+```
+
+If any check shows "error" or "warning", fix that BEFORE debugging application code.
+
+---
+
+## Vanilla JS Handlers Must Work in HTMX Polling Mode Too (Feb 6, 2026)
+
+### Problem: Buy/Sell buttons broken when falling back to polling
+
+When WebSocket is unavailable (e.g., due to missing `uvicorn[standard]`), the app falls back to HTMX polling. The vanilla JS `executeAggress()` handlers that were attached to Buy/Sell buttons stopped working after HTMX polling updates because:
+
+1. Initial page load: `attachAggressHandlers()` runs, attaches vanilla JS handlers
+2. HTMX polls `/partials/market/{id}` every 500ms
+3. HTMX uses `hx-swap-oob` to replace orderbook innerHTML with new HTML from server
+4. New buttons are created by HTMX, but they're FRESH from server (have `hx-post` attribute)
+5. **BUG**: `htmx:afterSwap` handler only called `checkPositionChange()`, not `attachAggressHandlers()`
+6. Result: New buttons have no vanilla JS handlers attached
+
+### The fix
+
+Call `attachAggressHandlers()` after EVERY HTMX swap, not just WebSocket updates:
+
+```javascript
+document.body.addEventListener('htmx:afterSwap', function(event) {
+    // Check for position changes
+    if (event.detail.target && event.detail.target.id === 'position-content') {
+        checkPositionChange();
+    }
+
+    // Re-attach aggress handlers after any swap that might affect orderbook
+    // This is crucial for fallback polling mode when WebSocket is unavailable
+    attachAggressHandlers();
+});
+```
+
+### Key insight: Dual update paths need dual handler attachment
+
+When you have TWO ways of updating the DOM:
+1. **WebSocket path**: `updateFromWebSocket()` → `applyOrderbookUpdate()` → `attachAggressHandlers()`
+2. **HTMX polling path**: HTMX automatic swap → `htmx:afterSwap` event → ??? (was missing!)
+
+You must call your handler attachment function in BOTH paths. The original bug was that `attachAggressHandlers()` was only called in the WebSocket path.
+
+### Debugging tip: Test with WebSocket disabled
+
+To verify polling fallback works correctly:
+1. Temporarily break WebSocket (remove `uvicorn[standard]` or block `/ws/...` endpoint)
+2. App should show "Polling" in connection indicator
+3. Test Buy/Sell buttons - they should still work
+4. If not, check `htmx:afterSwap` handler
