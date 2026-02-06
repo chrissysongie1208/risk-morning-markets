@@ -1398,3 +1398,100 @@ An automated agent cannot mark a human verification TODO as complete. The workfl
 5. Agent marks TODO complete or investigates further based on feedback
 
 This acknowledges the limits of automated testing for certain classes of bugs.
+
+---
+
+## HTMX Event Handlers on Dynamic Content (TODO-048) - 2026-02-06
+
+### Problem: HTMX events unreliable for dynamically-added forms
+The previous fix (TODO-047) added an "aggress lock" mechanism that was supposed to trigger on `htmx:beforeRequest`. The fix worked in theory but failed in practice because **HTMX event delegation may not reliably fire for forms that are dynamically added via WebSocket DOM updates**.
+
+The issue was:
+1. User clicks Buy/Sell button on a form in the orderbook
+2. WebSocket receives an update and replaces orderbook innerHTML
+3. `htmx.process()` is called to reinitialize HTMX on new elements
+4. BUT: The `htmx:beforeRequest` event handler might not fire consistently for the new forms
+5. The quantity field never gets populated → server rejects with 422 validation error
+
+### Root cause analysis
+The HTMX + WebSocket interaction created multiple potential failure points:
+- Event delegation from `document.body` to dynamically-added forms
+- HTMX internal state after DOM replacement
+- Timing between `htmx.process()` call and actual form submission
+- Hidden input fields starting empty and needing JS to populate them
+
+### Solution: Vanilla JavaScript fetch() replaces HTMX
+When HTMX's complexity creates unreliability, **fall back to simpler vanilla JavaScript**:
+
+```javascript
+// Execute aggress trade via fetch() - bypasses HTMX entirely
+async function executeAggress(orderId, button) {
+    const qty = getClickSize();
+    const formData = new FormData();
+    formData.append('quantity', qty.toString());
+    formData.append('fill_and_kill', getFillAndKill() ? 'true' : 'false');
+
+    const response = await fetch('/orders/' + orderId + '/aggress', {
+        method: 'POST',
+        body: formData,
+        headers: { 'HX-Request': 'true' },  // Mimic HTMX for server response
+        credentials: 'same-origin'
+    });
+
+    // Parse toast headers from response
+    const successMsg = response.headers.get('HX-Toast-Success');
+    const errorMsg = response.headers.get('HX-Toast-Error');
+    // Show toast and handle UI...
+}
+
+// Attach click handlers after every DOM update
+function attachAggressHandlers() {
+    const buttons = orderbook.querySelectorAll('.ladder-buy-btn, .ladder-sell-btn');
+    buttons.forEach(function(button) {
+        if (button.dataset.aggressHandlerAttached) return;  // Skip if already attached
+        button.dataset.aggressHandlerAttached = 'true';
+
+        // Extract order ID from form action URL
+        const form = button.closest('form');
+        const action = form.getAttribute('hx-post');
+        const orderId = action.match(/\/orders\/([^\/]+)\/aggress/)[1];
+
+        // Remove HTMX attributes to prevent double-submission
+        form.removeAttribute('hx-post');
+        form.removeAttribute('hx-swap');
+
+        button.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            executeAggress(orderId, button);
+        });
+    });
+}
+```
+
+### Key insight: data attribute to prevent duplicate handlers
+When attaching handlers to dynamic content, use a data attribute to track which elements already have handlers:
+```javascript
+if (button.dataset.aggressHandlerAttached) return;
+button.dataset.aggressHandlerAttached = 'true';
+```
+
+This prevents duplicate event handlers when `attachAggressHandlers()` is called multiple times.
+
+### Verification strategy
+Since automated tests can't test browser DOM behavior:
+1. Created `verify_aggress.py` script that tests the HTTP endpoint directly
+2. Script creates users, market, places order, aggresses, verifies trade
+3. Server-side logs confirm requests arrive correctly
+4. Console.log statements help debug client-side behavior
+
+### When to use HTMX vs vanilla JS
+**Use HTMX for:**
+- Static forms that exist in initial HTML
+- Forms that don't change after page load
+- Simple request/response cycles
+
+**Use vanilla JS fetch() for:**
+- Dynamically-added forms (created by WebSocket, polling, etc.)
+- Forms that need precise timing control
+- When HTMX's event chain is unreliable
