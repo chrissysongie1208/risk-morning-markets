@@ -454,6 +454,53 @@ async def cancel_order(order_id: str) -> None:
     )
 
 
+async def get_open_orders_with_users(
+    market_id: str,
+    side: Optional[OrderSide] = None
+) -> list[dict]:
+    """Get open orders with user display names in a single query (avoids N+1).
+
+    Returns a list of dicts with order fields plus 'display_name'.
+    This is optimized for the orderbook display - uses a JOIN to avoid
+    fetching each user separately.
+    """
+    query = """
+        SELECT o.*, u.display_name
+        FROM orders o
+        JOIN users u ON o.user_id = u.id
+        WHERE o.market_id = :market_id AND o.status = 'OPEN'
+    """
+    params: dict = {"market_id": market_id}
+
+    if side:
+        query += " AND o.side = :side"
+        params["side"] = side.value
+
+    # Order by price (best first) and time (oldest first for same price)
+    if side == OrderSide.BID:
+        query += " ORDER BY o.price DESC, o.created_at ASC"
+    else:
+        query += " ORDER BY o.price ASC, o.created_at ASC"
+
+    rows = await database.fetch_all(query, params)
+
+    return [
+        {
+            "id": row["id"],
+            "market_id": row["market_id"],
+            "user_id": row["user_id"],
+            "display_name": row["display_name"],
+            "side": row["side"],
+            "price": row["price"],
+            "quantity": row["quantity"],
+            "remaining_quantity": row["remaining_quantity"],
+            "status": row["status"],
+            "created_at": row["created_at"]
+        }
+        for row in rows
+    ]
+
+
 async def get_user_open_order_exposure(market_id: str, user_id: str) -> tuple[int, int]:
     """
     Get a user's open order exposure in a market.
@@ -552,6 +599,35 @@ async def get_recent_trades(market_id: str, limit: int = 10) -> list[Trade]:
             quantity=row["quantity"],
             created_at=datetime.fromisoformat(row["created_at"])
         )
+        for row in rows
+    ]
+
+
+async def get_recent_trades_with_users(market_id: str, limit: int = 10) -> list[dict]:
+    """Get recent trades with buyer/seller display names in a single query (avoids N+1).
+
+    Returns a list of dicts with trade fields plus 'buyer_name' and 'seller_name'.
+    This is optimized for the recent trades display.
+    """
+    rows = await database.fetch_all("""
+        SELECT t.*, buyer.display_name as buyer_name, seller.display_name as seller_name
+        FROM trades t
+        JOIN users buyer ON t.buyer_id = buyer.id
+        JOIN users seller ON t.seller_id = seller.id
+        WHERE t.market_id = :market_id
+        ORDER BY t.created_at DESC
+        LIMIT :limit
+    """, {"market_id": market_id, "limit": limit})
+
+    return [
+        {
+            "id": row["id"],
+            "buyer_name": row["buyer_name"],
+            "seller_name": row["seller_name"],
+            "price": row["price"],
+            "quantity": row["quantity"],
+            "created_at": row["created_at"]
+        }
         for row in rows
     ]
 

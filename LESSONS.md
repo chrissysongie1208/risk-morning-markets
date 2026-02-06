@@ -1587,3 +1587,68 @@ To verify polling fallback works correctly:
 2. App should show "Polling" in connection indicator
 3. Test Buy/Sell buttons - they should still work
 4. If not, check `htmx:afterSwap` handler
+
+---
+
+## N+1 Query Optimization (Feb 6, 2026)
+
+### The Problem: N+1 Database Queries
+
+When rendering the orderbook and recent trades, the original code did this:
+
+```python
+# For EACH order, do a separate query
+for order in bids:
+    order_user = await db.get_user_by_id(order.user_id)  # N queries!
+
+for trade in recent_trades:
+    buyer = await db.get_user_by_id(trade.buyer_id)  # N queries!
+    seller = await db.get_user_by_id(trade.seller_id)  # N queries!
+```
+
+With 10 bids, 10 offers, and 10 trades, this became **50+ database queries** per request.
+
+On a free-tier cloud database (Neon) with ~100ms latency per query, this meant:
+- 50 queries × 100ms = **5+ seconds per request**
+
+### The Fix: JOIN Queries
+
+Instead of fetching users separately, use SQL JOINs to get all data in one query:
+
+```python
+# database.py
+async def get_open_orders_with_users(market_id: str, side: Optional[OrderSide] = None) -> list[dict]:
+    rows = await database.fetch_all("""
+        SELECT o.*, u.display_name
+        FROM orders o
+        JOIN users u ON o.user_id = u.id
+        WHERE o.market_id = :market_id AND o.status = 'OPEN'
+        ORDER BY o.price DESC, o.created_at ASC
+    """, {"market_id": market_id})
+    return [dict(row) for row in rows]
+
+async def get_recent_trades_with_users(market_id: str, limit: int = 10) -> list[dict]:
+    rows = await database.fetch_all("""
+        SELECT t.*, buyer.display_name as buyer_name, seller.display_name as seller_name
+        FROM trades t
+        JOIN users buyer ON t.buyer_id = buyer.id
+        JOIN users seller ON t.seller_id = seller.id
+        WHERE t.market_id = :market_id
+        ORDER BY t.created_at DESC
+        LIMIT :limit
+    """, {"market_id": market_id, "limit": limit})
+    return [dict(row) for row in rows]
+```
+
+### Query Count Improvement
+
+**Before**: 2 + N_bids + N_offers + 2*N_trades queries
+**After**: 6 queries total (auth, activity update, market, bids, offers, trades, position)
+
+### Key Takeaways
+
+1. **Always watch for N+1 queries** when iterating over a list and fetching related data
+2. **Use JOINs** instead of separate queries for related data
+3. **Profile your endpoints** - add timing logs to see where time is spent
+4. **Cloud database latency matters** - each query might have 50-100ms overhead
+5. **Test locally AND in production** - local tests don't reveal network latency issues

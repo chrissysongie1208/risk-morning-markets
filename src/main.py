@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlencode
@@ -1126,6 +1127,10 @@ async def partial_market_all(
     This reduces HTTP requests from 3/sec to 1/sec per user.
     Auto-redirects to results page when market is settled.
     Also updates user's last_activity timestamp for session exclusivity.
+
+    OPTIMIZED: Uses JOIN queries to avoid N+1 database calls.
+    Before: 2 + N_bids + N_offers + 2*N_trades queries (could be 50+ queries!)
+    After: 6 queries total (auth, activity update, market, bids, offers, trades, position)
     """
     user = await auth.get_current_user(session)
     if not user:
@@ -1145,55 +1150,54 @@ async def partial_market_all(
             headers={"HX-Redirect": f"/markets/{market_id}/results"}
         )
 
-    # Get order book (all open orders)
-    bids = await db.get_open_orders(market_id, side=OrderSide.BID)
-    offers = await db.get_open_orders(market_id, side=OrderSide.OFFER)
+    # Get order book with user names in single query (optimized - avoids N+1)
+    bids_raw = await db.get_open_orders_with_users(market_id, side=OrderSide.BID)
+    offers_raw = await db.get_open_orders_with_users(market_id, side=OrderSide.OFFER)
 
-    # Enrich orders with user display names
-    bids_with_users = []
-    for order in bids:
-        order_user = await db.get_user_by_id(order.user_id)
-        bids_with_users.append(OrderWithUser(
-            id=order.id,
-            user_id=order.user_id,
-            display_name=order_user.display_name if order_user else "Unknown",
-            side=order.side,
-            price=order.price,
-            quantity=order.quantity,
-            remaining_quantity=order.remaining_quantity,
-            status=order.status,
-            created_at=order.created_at
-        ))
+    # Convert to OrderWithUser objects
+    bids_with_users = [
+        OrderWithUser(
+            id=row["id"],
+            user_id=row["user_id"],
+            display_name=row["display_name"],
+            side=OrderSide(row["side"]),
+            price=row["price"],
+            quantity=row["quantity"],
+            remaining_quantity=row["remaining_quantity"],
+            status=OrderStatus(row["status"]),
+            created_at=datetime.fromisoformat(row["created_at"]) if isinstance(row["created_at"], str) else row["created_at"]
+        )
+        for row in bids_raw
+    ]
 
-    offers_with_users = []
-    for order in offers:
-        order_user = await db.get_user_by_id(order.user_id)
-        offers_with_users.append(OrderWithUser(
-            id=order.id,
-            user_id=order.user_id,
-            display_name=order_user.display_name if order_user else "Unknown",
-            side=order.side,
-            price=order.price,
-            quantity=order.quantity,
-            remaining_quantity=order.remaining_quantity,
-            status=order.status,
-            created_at=order.created_at
-        ))
+    offers_with_users = [
+        OrderWithUser(
+            id=row["id"],
+            user_id=row["user_id"],
+            display_name=row["display_name"],
+            side=OrderSide(row["side"]),
+            price=row["price"],
+            quantity=row["quantity"],
+            remaining_quantity=row["remaining_quantity"],
+            status=OrderStatus(row["status"]),
+            created_at=datetime.fromisoformat(row["created_at"]) if isinstance(row["created_at"], str) else row["created_at"]
+        )
+        for row in offers_raw
+    ]
 
-    # Get recent trades with user names
-    recent_trades = await db.get_recent_trades(market_id, limit=10)
-    trades_with_users = []
-    for trade in recent_trades:
-        buyer = await db.get_user_by_id(trade.buyer_id)
-        seller = await db.get_user_by_id(trade.seller_id)
-        trades_with_users.append(TradeWithUsers(
-            id=trade.id,
-            buyer_name=buyer.display_name if buyer else "Unknown",
-            seller_name=seller.display_name if seller else "Unknown",
-            price=trade.price,
-            quantity=trade.quantity,
-            created_at=trade.created_at
-        ))
+    # Get recent trades with user names in single query (optimized - avoids N+1)
+    trades_raw = await db.get_recent_trades_with_users(market_id, limit=10)
+    trades_with_users = [
+        TradeWithUsers(
+            id=row["id"],
+            buyer_name=row["buyer_name"],
+            seller_name=row["seller_name"],
+            price=row["price"],
+            quantity=row["quantity"],
+            created_at=datetime.fromisoformat(row["created_at"]) if isinstance(row["created_at"], str) else row["created_at"]
+        )
+        for row in trades_raw
+    ]
 
     # Get user's position
     position = await db.get_position(market_id, user.id)
@@ -1359,6 +1363,10 @@ async def generate_market_html_for_user(market_id: str, user_id: str) -> str:
     """Generate HTML update for a market to send via WebSocket.
 
     Returns the same content as the combined partial endpoint.
+
+    OPTIMIZED: Uses JOIN queries to avoid N+1 database calls.
+    Before: 2 + N_bids + N_offers + 2*N_trades queries
+    After: 5 queries total (market, user, bids, offers, trades, position)
     """
     market = await db.get_market(market_id)
     if not market:
@@ -1373,55 +1381,54 @@ async def generate_market_html_for_user(market_id: str, user_id: str) -> str:
     if not user:
         return '<div id="position-content"><p>Session expired.</p></div>'
 
-    # Get order book
-    bids = await db.get_open_orders(market_id, side=OrderSide.BID)
-    offers = await db.get_open_orders(market_id, side=OrderSide.OFFER)
+    # Get order book with user names in single query (optimized - avoids N+1)
+    bids_raw = await db.get_open_orders_with_users(market_id, side=OrderSide.BID)
+    offers_raw = await db.get_open_orders_with_users(market_id, side=OrderSide.OFFER)
 
-    # Enrich orders with user display names
-    bids_with_users = []
-    for order in bids:
-        order_user = await db.get_user_by_id(order.user_id)
-        bids_with_users.append(OrderWithUser(
-            id=order.id,
-            user_id=order.user_id,
-            display_name=order_user.display_name if order_user else "Unknown",
-            side=order.side,
-            price=order.price,
-            quantity=order.quantity,
-            remaining_quantity=order.remaining_quantity,
-            status=order.status,
-            created_at=order.created_at
-        ))
+    # Convert to OrderWithUser objects
+    bids_with_users = [
+        OrderWithUser(
+            id=row["id"],
+            user_id=row["user_id"],
+            display_name=row["display_name"],
+            side=OrderSide(row["side"]),
+            price=row["price"],
+            quantity=row["quantity"],
+            remaining_quantity=row["remaining_quantity"],
+            status=OrderStatus(row["status"]),
+            created_at=datetime.fromisoformat(row["created_at"]) if isinstance(row["created_at"], str) else row["created_at"]
+        )
+        for row in bids_raw
+    ]
 
-    offers_with_users = []
-    for order in offers:
-        order_user = await db.get_user_by_id(order.user_id)
-        offers_with_users.append(OrderWithUser(
-            id=order.id,
-            user_id=order.user_id,
-            display_name=order_user.display_name if order_user else "Unknown",
-            side=order.side,
-            price=order.price,
-            quantity=order.quantity,
-            remaining_quantity=order.remaining_quantity,
-            status=order.status,
-            created_at=order.created_at
-        ))
+    offers_with_users = [
+        OrderWithUser(
+            id=row["id"],
+            user_id=row["user_id"],
+            display_name=row["display_name"],
+            side=OrderSide(row["side"]),
+            price=row["price"],
+            quantity=row["quantity"],
+            remaining_quantity=row["remaining_quantity"],
+            status=OrderStatus(row["status"]),
+            created_at=datetime.fromisoformat(row["created_at"]) if isinstance(row["created_at"], str) else row["created_at"]
+        )
+        for row in offers_raw
+    ]
 
-    # Get recent trades
-    recent_trades = await db.get_recent_trades(market_id, limit=10)
-    trades_with_users = []
-    for trade in recent_trades:
-        buyer = await db.get_user_by_id(trade.buyer_id)
-        seller = await db.get_user_by_id(trade.seller_id)
-        trades_with_users.append(TradeWithUsers(
-            id=trade.id,
-            buyer_name=buyer.display_name if buyer else "Unknown",
-            seller_name=seller.display_name if seller else "Unknown",
-            price=trade.price,
-            quantity=trade.quantity,
-            created_at=trade.created_at
-        ))
+    # Get recent trades with user names in single query (optimized - avoids N+1)
+    trades_raw = await db.get_recent_trades_with_users(market_id, limit=10)
+    trades_with_users = [
+        TradeWithUsers(
+            id=row["id"],
+            buyer_name=row["buyer_name"],
+            seller_name=row["seller_name"],
+            price=row["price"],
+            quantity=row["quantity"],
+            created_at=datetime.fromisoformat(row["created_at"]) if isinstance(row["created_at"], str) else row["created_at"]
+        )
+        for row in trades_raw
+    ]
 
     # Get user's position
     position = await db.get_position(market_id, user_id)
