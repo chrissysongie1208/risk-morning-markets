@@ -1652,3 +1652,29 @@ async def get_recent_trades_with_users(market_id: str, limit: int = 10) -> list[
 3. **Profile your endpoints** - add timing logs to see where time is spent
 4. **Cloud database latency matters** - each query might have 50-100ms overhead
 5. **Test locally AND in production** - local tests don't reveal network latency issues
+
+---
+
+## Agent Limitations: Human Verification TODOs (Feb 6, 2026)
+
+### What an agent CAN do for HUMAN VERIFICATION tasks:
+1. **Verify code is deployed**: Check git status, recent commits, that fixes are in the codebase
+2. **Verify code is correct**: Read source files, grep for usage of functions
+3. **Run local tests**: Execute pytest to ensure unit tests pass
+4. **Document findings**: Update OBSERVATIONS.md with what was verified
+5. **Provide clear instructions**: Write exactly what the human needs to check
+
+### What an agent CANNOT do:
+1. **Access production environments**: WebFetch to authenticated/protected URLs often fails (403)
+2. **Check live Render logs**: Requires browser login to dashboard.render.com
+3. **Test real user experience**: Can't interact with a real browser
+4. **Verify production performance**: Can't measure actual request timing in deployed environment
+
+### Best practice for HUMAN VERIFICATION TODOs:
+1. Agent verifies all code-level aspects (committed, correct syntax, tests pass)
+2. Agent writes detailed verification checklist in OBSERVATIONS.md
+3. Agent does NOT mark the TODO as complete
+4. Human performs verification and reports results
+5. Next agent run (or human) marks TODO complete based on human feedback
+
+This prevents premature closure of verification tasks that require real human testing
