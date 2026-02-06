@@ -130,33 +130,36 @@
 
 - [x] TODO-051: **HUMAN VERIFICATION** - Render logs confirm: (1) "AGGRESS REQUEST RECEIVED" messages appearing, (2) Requests returning 200 OK, (3) Buttons ARE working. **HOWEVER** - new issue discovered: requests are SLOW (2.6-3.5 seconds). See TODO-052.
 
-- [ ] TODO-052: **PERFORMANCE - Aggress requests are SLOW (2.6-3.5 seconds)** - Render logs show:
+- [ ] TODO-052: **CRITICAL PERFORMANCE - Everything is SLOW (9-10 seconds)** - Render logs show:
     ```
-    SLOW: aggress matching took 2613.88ms (user=chrson)
-    SLOW REQUEST: POST /orders/.../aggress took 3486.60ms
+    GET /markets/... took 10552.60ms (page load!)
+    GET /partials/market/... took 9628.65ms (polling!)
+    Aggress matching took 2344.17ms
+    POST /orders/.../aggress took 3182.62ms
     ```
-    This is unacceptable for a trading app - should be <200ms.
 
-    **INVESTIGATE**:
-    1. Is it database latency? Neon free tier may have cold start or connection overhead
-    2. Is it the matching logic? Check for N+1 queries or inefficient lookups
-    3. Is it connection pooling? Are connections being reused properly?
-    4. Is it WebSocket broadcast? Check time spent broadcasting vs matching
+    **ADDITIONAL ISSUE**: Trades return 200 OK but positions DON'T UPDATE in GUI. WebSocket is connected but updates aren't reaching the browser. The extreme slowness may be blocking or queuing WebSocket broadcasts.
 
-    **ALSO SLOW**: `/partials/market/...` polling takes 9+ seconds (9605ms in logs)
+    **ROOT CAUSE LIKELY**: Neon free tier database latency. Every database query is taking seconds instead of milliseconds.
 
     **DEBUGGING STEPS**:
-    - Add timing logs to EACH database query in the aggress flow
-    - Check if first request is slower than subsequent (cold start)
-    - Test with local PostgreSQL to compare (eliminate network as variable)
-    - Check Neon dashboard for query performance metrics
+    1. Add timing logs to EACH database query (not just endpoints)
+    2. Check `database.py` - are there N+1 queries? Inefficient JOINs?
+    3. Test with local PostgreSQL via docker-compose - if fast locally, it's Neon
+    4. Check Neon dashboard for query performance
+    5. Check if database connection is being re-established on each request (no pooling)
 
-    **POSSIBLE FIXES**:
-    - Add database connection pooling (min_size, max_size params)
-    - Add indexes on frequently-queried columns (market_id, user_id, status)
-    - Cache position limits and market status (they don't change often)
-    - Reduce number of queries in matching flow
-    - Consider switching to a faster database if Neon free tier is the bottleneck
+    **LIKELY FIXES**:
+    1. **Connection pooling**: Check `databases` library config - ensure connections are reused
+    2. **Add indexes**: `CREATE INDEX` on orders(market_id, status), positions(market_id, user_id)
+    3. **Reduce queries**: Cache position_limit, market status in memory
+    4. **Batch queries**: Instead of N queries, use single query with IN clause
+    5. **If all else fails**: Upgrade Neon or switch to Render's PostgreSQL
+
+    **FOR GUI NOT UPDATING**:
+    - Check if WebSocket broadcast is being called after trade
+    - Check if broadcast is timing out due to slow DB queries
+    - Check browser console for WebSocket messages received
 
 <!-- Add new TODOs here with sequential IDs -->
 
