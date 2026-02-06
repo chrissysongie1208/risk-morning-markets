@@ -44,3 +44,18 @@ A scratchpad for thoughts during investigation. Not everything needs to be a TOD
 
 **Git status**: All fixes committed and pushed (68dcc9a, 296e2e4)
 
+### 2026-02-06 - N+1 Query Fix Verification (TODO-053)
+**Observation**: Agent run verified the N+1 fix code is correctly deployed:
+- `get_open_orders_with_users()` at `database.py:457` - single JOIN query for orderbook
+- `get_recent_trades_with_users()` at `database.py:606` - single JOIN query for trades
+- `main.py` uses these at lines 1154-1155, 1189, 1385-1386, 1420
+- Latest commit `6efdc03` is `perf: Fix N+1 database queries`
+
+**What human should verify in production**:
+1. Check Render logs: `/partials/market/...` timing should be **<500ms** (was 9+ seconds)
+2. Check Render logs: `/orders/.../aggress` timing should be **<500ms** (was 2.6-3.5 seconds)
+3. GUI should feel responsive - updates within ~500ms, not 4-5 second delays
+4. If still slow after N+1 fix, the issue is Neon database latency (investigate connection pooling or upgrade plan)
+
+**Git status**: N+1 fix committed and pushed in `6efdc03`
+
