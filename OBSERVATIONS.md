@@ -59,3 +59,26 @@ A scratchpad for thoughts during investigation. Not everything needs to be a TOD
 
 **Git status**: N+1 fix committed and pushed in `6efdc03`
 
+### 2026-02-06 - Human Couldn't See Console Logs (Q-001 Follow-up)
+**Observation**: Human answered Q-001 saying they "can't see it in Console tab"
+**Investigation**:
+- Verified code has correct console.log statements (grep found 8 `[AGGRESS]` logs)
+- The issue is the logs only fire on specific code paths:
+  - `[AGGRESS] Handler attached` - only if there are Buy/Sell buttons in orderbook
+  - `[AGGRESS] Button clicked` - only when button is clicked
+  - Human may have been looking at the wrong time or with no orders present
+
+**Fix Applied**:
+- Added `[MARKET] Initializing...` log that ALWAYS fires on page load
+- Added `[MARKET] Initialization complete. Buy/Sell handlers attached: N`
+- Added `[AGGRESS] Button clicked` log right when button click happens
+- Created Q-002 with detailed debugging instructions
+
+**Git commit**: `d4f3f31` - deployed, Render should auto-deploy in ~2-3 min
+
+**What human should check after deploy**:
+1. Hard refresh (Ctrl+Shift+R) to get new JS
+2. Look for `[MARKET] Initializing...` on page load (proves JS loaded)
+3. If they don't see it, there's a deployment or caching issue
+4. If they DO see it, clicking buttons should show `[AGGRESS] Button clicked...`
+

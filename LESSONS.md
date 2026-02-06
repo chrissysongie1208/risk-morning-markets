@@ -1678,3 +1678,53 @@ async def get_recent_trades_with_users(market_id: str, limit: int = 10) -> list[
 5. Next agent run (or human) marks TODO complete based on human feedback
 
 This prevents premature closure of verification tasks that require real human testing
+
+---
+
+## Debugging Production with Console Logs (Feb 6, 2026)
+
+### Problem: User couldn't see expected console logs
+The human reported they couldn't see `[AGGRESS]` logs in the browser console. This could mean:
+1. JavaScript isn't loading at all
+2. The code path wasn't being executed
+3. User was looking for the wrong log messages
+4. Code was cached
+
+### Solution: Add obvious initialization logs
+When debugging issues where users can't see expected console output:
+
+1. **Add a log that ALWAYS fires on page load**:
+```javascript
+function initialize() {
+    console.log('[MARKET] Initializing...', someContext);
+    // ... rest of init
+    console.log('[MARKET] Initialization complete');
+}
+```
+
+2. **Log both the trigger AND the action**:
+```javascript
+button.addEventListener('click', function() {
+    console.log('[AGGRESS] Button clicked');  // Log the trigger
+    doSomething();  // The action
+});
+```
+
+3. **Count things that were processed**:
+```javascript
+console.log('[MARKET] Buy/Sell handlers attached:',
+    document.querySelectorAll('[data-aggress-handler-attached]').length);
+```
+
+4. **Provide clear debugging instructions** in QUESTIONS.md:
+   - What logs to look for
+   - What it means if logs are missing
+   - How to hard refresh to clear cache
+
+### Key insight
+When a user says "I can't see the logs", don't assume they're wrong. Consider:
+- Are the logs in a code path that ALWAYS runs?
+- Could the browser be serving cached JavaScript?
+- Are they looking for the right log prefix?
+
+Add logs that ALWAYS fire to establish baseline visibility
