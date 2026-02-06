@@ -40,54 +40,133 @@
     let audioContext = null;
     let soundEnabled = false;
 
-    // ============ Aggress Form Submission Lock ============
-    // Prevents WebSocket DOM updates from destroying forms mid-submission
+    // ============ Aggress Submission (Vanilla JS) ============
+    // Uses fetch() instead of HTMX for more reliable aggress form submission
+    // This avoids complex HTMX event chain issues with dynamically added forms
     let aggressInProgress = false;
     let pendingOrderbookUpdate = null;
-    let aggressSubmissionTimeout = null;
-    const AGGRESS_LOCK_TIMEOUT = 2000; // Max time to hold lock (safety valve)
-
-    function startAggressLock() {
-        aggressInProgress = true;
-        pendingOrderbookUpdate = null;
-        console.log('[AGGRESS] Lock acquired - WebSocket orderbook updates paused');
-
-        // Safety valve: auto-release lock after timeout
-        if (aggressSubmissionTimeout) {
-            clearTimeout(aggressSubmissionTimeout);
-        }
-        aggressSubmissionTimeout = setTimeout(function() {
-            console.log('[AGGRESS] Lock timeout - forcing release');
-            releaseAggressLock();
-        }, AGGRESS_LOCK_TIMEOUT);
-    }
-
-    function releaseAggressLock() {
-        if (aggressSubmissionTimeout) {
-            clearTimeout(aggressSubmissionTimeout);
-            aggressSubmissionTimeout = null;
-        }
-
-        aggressInProgress = false;
-        console.log('[AGGRESS] Lock released');
-
-        // Apply any pending orderbook update
-        if (pendingOrderbookUpdate) {
-            console.log('[AGGRESS] Applying pending orderbook update');
-            applyOrderbookUpdate(pendingOrderbookUpdate);
-            pendingOrderbookUpdate = null;
-        }
-    }
 
     function applyOrderbookUpdate(newOrderbook) {
         const orderbookTarget = document.getElementById('orderbook');
         if (orderbookTarget && newOrderbook) {
             orderbookTarget.innerHTML = newOrderbook.innerHTML;
-            // Re-process HTMX attributes on newly added elements (forms, buttons)
-            if (typeof htmx !== 'undefined') {
-                htmx.process(orderbookTarget);
+            // Attach click handlers to new aggress buttons
+            attachAggressHandlers();
+        }
+    }
+
+    // Execute aggress trade via fetch() - bypasses HTMX entirely
+    async function executeAggress(orderId, button) {
+        const qty = getClickSize();
+        const fak = getFillAndKill();
+
+        console.log('[AGGRESS] Executing via fetch:', { orderId, qty, fak });
+
+        // Disable button and show spinner
+        button.disabled = true;
+        const btnText = button.querySelector('.btn-text');
+        const btnSpinner = button.querySelector('.btn-spinner');
+        if (btnText) btnText.style.display = 'none';
+        if (btnSpinner) btnSpinner.style.display = 'inline-block';
+
+        // Block WebSocket updates during submission
+        aggressInProgress = true;
+        pendingOrderbookUpdate = null;
+
+        const startTime = performance.now();
+
+        try {
+            const formData = new FormData();
+            formData.append('quantity', qty.toString());
+            formData.append('fill_and_kill', fak ? 'true' : 'false');
+
+            const response = await fetch('/orders/' + orderId + '/aggress', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'HX-Request': 'true'  // Mimic HTMX request for proper response
+                },
+                credentials: 'same-origin'  // Include cookies
+            });
+
+            logTiming('Aggress fetch', startTime, 'orderId=' + orderId);
+
+            // Read response headers for toast messages
+            const successMsg = response.headers.get('HX-Toast-Success');
+            const errorMsg = response.headers.get('HX-Toast-Error');
+
+            if (successMsg) {
+                showToast(successMsg, false);
+                console.log('[AGGRESS] Success:', successMsg);
+            } else if (errorMsg) {
+                showToast(errorMsg, true);
+                console.log('[AGGRESS] Error:', errorMsg);
+            } else if (!response.ok) {
+                // HTTP error without custom header
+                const text = await response.text();
+                showToast('Trade failed: ' + (text || response.statusText), true);
+                console.log('[AGGRESS] HTTP error:', response.status, text);
+            }
+
+        } catch (error) {
+            console.error('[AGGRESS] Fetch error:', error);
+            showToast('Network error - please try again', true);
+        } finally {
+            // Re-enable button
+            button.disabled = false;
+            if (btnText) btnText.style.display = '';
+            if (btnSpinner) btnSpinner.style.display = '';
+
+            // Release lock and apply pending update
+            aggressInProgress = false;
+            console.log('[AGGRESS] Lock released');
+            if (pendingOrderbookUpdate) {
+                console.log('[AGGRESS] Applying pending orderbook update');
+                applyOrderbookUpdate(pendingOrderbookUpdate);
+                pendingOrderbookUpdate = null;
             }
         }
+    }
+
+    // Attach click handlers to aggress buttons (called on init and after DOM updates)
+    function attachAggressHandlers() {
+        const orderbook = document.getElementById('orderbook');
+        if (!orderbook) return;
+
+        // Find all aggress buttons by their class (ladder-buy-btn or ladder-sell-btn)
+        const buttons = orderbook.querySelectorAll('.ladder-buy-btn, .ladder-sell-btn');
+
+        buttons.forEach(function(button) {
+            // Skip if already has handler attached
+            if (button.dataset.aggressHandlerAttached) return;
+            button.dataset.aggressHandlerAttached = 'true';
+
+            // Find the form and extract order ID from action URL
+            const form = button.closest('form');
+            if (!form) return;
+
+            const action = form.getAttribute('hx-post');
+            if (!action) return;
+
+            // Extract order ID from URL like /orders/{id}/aggress
+            const match = action.match(/\/orders\/([^\/]+)\/aggress/);
+            if (!match) return;
+
+            const orderId = match[1];
+
+            // Prevent HTMX from handling this form
+            form.removeAttribute('hx-post');
+            form.removeAttribute('hx-swap');
+
+            // Add click handler
+            button.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                executeAggress(orderId, button);
+            });
+
+            console.log('[AGGRESS] Handler attached for order:', orderId);
+        });
     }
 
     // ============ Toast Notifications ============
@@ -365,42 +444,15 @@
     }
 
     // ============ HTMX Event Handlers ============
-    // Handle HTMX responses for inline form submissions
+    // Handle HTMX responses for non-aggress form submissions (order form, cancel)
+    // NOTE: Aggress forms are handled by vanilla JS executeAggress() instead
     // NOTE: These must be attached after DOM is ready since script is in <head>
-    // Track request start times for latency measurement
     const htmxRequestTimes = new Map();
 
     function setupHTMXEventHandlers() {
         document.body.addEventListener('htmx:beforeRequest', function(event) {
-            // DEBUG: Log every htmx:beforeRequest event
-            console.log('[HTMX DEBUG] htmx:beforeRequest fired', {
-                elt: event.detail.elt,
-                tagName: event.detail.elt ? event.detail.elt.tagName : 'null',
-                classList: event.detail.elt ? event.detail.elt.className : 'null',
-                hasAggressClass: event.detail.elt && event.detail.elt.classList && event.detail.elt.classList.contains('aggress-form')
-            });
-
             // Record start time for timing measurement
             htmxRequestTimes.set(event.detail.elt, performance.now());
-
-            // For aggress forms, set the quantity and fill_and_kill from controls
-            // AND acquire the aggress lock to prevent WebSocket DOM updates
-            if (event.detail.elt.classList && event.detail.elt.classList.contains('aggress-form')) {
-                console.log('[HTMX DEBUG] Aggress form detected, acquiring lock and setting values');
-                // Acquire lock to prevent WebSocket from destroying our form mid-submission
-                startAggressLock();
-
-                const qtyInput = event.detail.elt.querySelector('.aggress-qty');
-                if (qtyInput) {
-                    qtyInput.value = getClickSize();
-                    console.log('[HTMX DEBUG] Set quantity to:', qtyInput.value);
-                }
-                const fakInput = event.detail.elt.querySelector('.aggress-fak');
-                if (fakInput) {
-                    fakInput.value = getFillAndKill() ? 'true' : 'false';
-                    console.log('[HTMX DEBUG] Set fill_and_kill to:', fakInput.value);
-                }
-            }
 
             // Disable submit button during request
             const button = event.detail.elt.querySelector('button[type="submit"]');
@@ -410,26 +462,10 @@
         });
 
         document.body.addEventListener('htmx:afterRequest', function(event) {
-            // DEBUG: Log every htmx:afterRequest event
-            const xhr = event.detail.xhr;
-            console.log('[HTMX DEBUG] htmx:afterRequest fired', {
-                elt: event.detail.elt,
-                successful: event.detail.successful,
-                status: xhr ? xhr.status : 'no xhr',
-                toastSuccess: xhr ? xhr.getResponseHeader('HX-Toast-Success') : null,
-                toastError: xhr ? xhr.getResponseHeader('HX-Toast-Error') : null
-            });
-
             // Re-enable submit button
             const button = event.detail.elt.querySelector('button[type="submit"]');
             if (button) {
                 button.disabled = false;
-            }
-
-            // Release aggress lock if this was an aggress form submission
-            if (event.detail.elt.classList && event.detail.elt.classList.contains('aggress-form')) {
-                console.log('[HTMX DEBUG] Releasing aggress lock');
-                releaseAggressLock();
             }
 
             // Log round-trip timing
@@ -540,12 +576,14 @@
             connectWebSocket();
             initClickSize();
             initFillAndKill();
+            attachAggressHandlers();  // Attach vanilla JS handlers to Buy/Sell buttons
         });
     } else {
         setupHTMXEventHandlers();
         connectWebSocket();
         initClickSize();
         initFillAndKill();
+        attachAggressHandlers();  // Attach vanilla JS handlers to Buy/Sell buttons
     }
 
     window.addEventListener('beforeunload', function() {
