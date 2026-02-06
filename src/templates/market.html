@@ -162,6 +162,7 @@
             button.addEventListener('click', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
+                console.log('[AGGRESS] Button clicked for order:', orderId, 'Button text:', button.textContent.trim());
                 executeAggress(orderId, button);
             });
 
@@ -579,20 +580,21 @@
     // ============ Initialization ============
     document.addEventListener('click', initAudio, { once: true });
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-            setupHTMXEventHandlers();
-            connectWebSocket();
-            initClickSize();
-            initFillAndKill();
-            attachAggressHandlers();  // Attach vanilla JS handlers to Buy/Sell buttons
-        });
-    } else {
+    function initialize() {
+        console.log('[MARKET] Initializing market page for market:', marketId);
         setupHTMXEventHandlers();
         connectWebSocket();
         initClickSize();
         initFillAndKill();
-        attachAggressHandlers();  // Attach vanilla JS handlers to Buy/Sell buttons
+        const buttonsAttached = attachAggressHandlers();
+        console.log('[MARKET] Initialization complete. Buy/Sell handlers attached:',
+                    document.querySelectorAll('[data-aggress-handler-attached]').length);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initialize);
+    } else {
+        initialize();
     }
 
     window.addEventListener('beforeunload', function() {
