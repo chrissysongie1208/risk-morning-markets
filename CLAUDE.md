@@ -114,9 +114,64 @@ A TODO is NOT complete just because:
 
 ---
 
+## Debugging Production Issues (IMPORTANT)
+
+**When something works locally but fails in production, check INFRASTRUCTURE before CODE.**
+
+### Step 1: Check the Status Endpoint
+```bash
+curl https://risk-morning-markets.onrender.com/debug/status
+```
+This returns health checks for:
+- Database connectivity
+- WebSocket library installed
+- Uvicorn extras (websockets support)
+- Active WebSocket connections
+- Configuration
+
+**If any check shows "error" or "warning", fix that FIRST.**
+
+### Step 2: Check Render Logs
+- Go to https://dashboard.render.com
+- Look for ERROR or WARNING messages
+- Common issues:
+  - "No supported WebSocket library detected" → need `uvicorn[standard]`
+  - Connection timeouts → database issues
+  - 404 on `/ws/...` → WebSocket not working
+
+### Step 3: Check Dependencies
+```bash
+cat requirements.txt
+```
+Common gotchas:
+- `uvicorn` alone doesn't include WebSocket → use `uvicorn[standard]`
+- Missing database drivers
+- Version conflicts
+
+### Step 4: Test Production Directly
+```bash
+# Test if server responds
+curl https://risk-morning-markets.onrender.com/debug/ping
+
+# Test WebSocket (should not 404)
+curl -i https://risk-morning-markets.onrender.com/ws/market/test
+```
+
+### Production Debugging Checklist
+□ Check `/debug/status` endpoint for infrastructure health
+□ Check Render logs for errors (not just local tests)
+□ Check `requirements.txt` for missing extras like `[standard]`
+□ Verify features in actual browser, not just automated tests
+□ Look for "fallback" behavior that masks failures (e.g., polling instead of WebSocket)
+
+**Unit tests passing does NOT mean production works. Always verify in the real environment.**
+
+---
+
 ## When Stuck
 
 - Try at least 3 different approaches before giving up
+- **For production issues**: Check `/debug/status` and Render logs FIRST
 - Write observations to `OBSERVATIONS.md` as you investigate
 - If truly stuck: write to `QUESTIONS.md` with `Status: PENDING`
 - Mark TODO as `[?]`

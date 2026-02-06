@@ -94,13 +94,114 @@ def set_session_cookie(response: RedirectResponse, token: str) -> RedirectRespon
     return response
 
 
-# ============ Debug Endpoint ============
+# ============ Debug Endpoints ============
 
 @app.get("/debug/ping")
 async def debug_ping():
     """Simple endpoint to verify server is running and accepting requests."""
     logger.warning("DEBUG PING RECEIVED")
     return {"status": "ok", "message": "Server is running"}
+
+
+@app.get("/debug/status")
+async def debug_status():
+    """
+    Comprehensive status endpoint for diagnosing production issues.
+
+    The looping agent should check this endpoint when debugging production bugs.
+    It reports on infrastructure health, not just application code.
+
+    Usage: curl https://risk-morning-markets.onrender.com/debug/status
+    """
+    import sys
+
+    status_report = {
+        "server": "ok",
+        "python_version": sys.version,
+        "checks": {}
+    }
+
+    # Check 1: Database connectivity
+    try:
+        result = await db.database.fetch_one("SELECT 1 as test")
+        status_report["checks"]["database"] = {
+            "status": "ok" if result else "error",
+            "message": "Connected to PostgreSQL"
+        }
+    except Exception as e:
+        status_report["checks"]["database"] = {
+            "status": "error",
+            "message": str(e)
+        }
+
+    # Check 2: WebSocket library availability
+    try:
+        import websockets
+        status_report["checks"]["websockets"] = {
+            "status": "ok",
+            "message": f"websockets library installed (version: {websockets.__version__})"
+        }
+    except ImportError:
+        status_report["checks"]["websockets"] = {
+            "status": "error",
+            "message": "websockets library NOT installed - WebSocket will fail! Use uvicorn[standard]"
+        }
+
+    # Check 3: Uvicorn extras
+    try:
+        import uvicorn
+        # Check if running with standard extras (has websockets, httptools, etc.)
+        has_websockets = False
+        try:
+            import websockets
+            has_websockets = True
+        except ImportError:
+            pass
+
+        status_report["checks"]["uvicorn"] = {
+            "status": "ok" if has_websockets else "warning",
+            "version": uvicorn.__version__,
+            "has_websocket_support": has_websockets,
+            "message": "uvicorn[standard] installed" if has_websockets else "uvicorn installed but missing [standard] extras"
+        }
+    except ImportError:
+        status_report["checks"]["uvicorn"] = {
+            "status": "error",
+            "message": "uvicorn not installed"
+        }
+
+    # Check 4: WebSocket connection manager state
+    status_report["checks"]["websocket_connections"] = {
+        "status": "ok",
+        "active_markets": len(ws_manager.active_connections),
+        "total_connections": sum(len(conns) for conns in ws_manager.active_connections.values())
+    }
+
+    # Check 5: Configuration
+    try:
+        position_limit = await db.get_position_limit()
+        status_report["checks"]["config"] = {
+            "status": "ok",
+            "position_limit": position_limit
+        }
+    except Exception as e:
+        status_report["checks"]["config"] = {
+            "status": "error",
+            "message": str(e)
+        }
+
+    # Overall status
+    all_ok = all(
+        check.get("status") == "ok"
+        for check in status_report["checks"].values()
+    )
+    status_report["overall"] = "ok" if all_ok else "degraded"
+
+    # Log for visibility in Render logs
+    if not all_ok:
+        logger.warning(f"DEBUG STATUS - DEGRADED: {status_report}")
+
+    return status_report
 
 
 # ============ Landing Page ============

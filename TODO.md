@@ -128,7 +128,35 @@
 
 - [x] TODO-050: **Buy/Sell buttons - polling fallback fix** - **ROOT CAUSE FOUND**: When WebSocket was broken (TODO-049), the app fell back to HTMX polling. But the `htmx:afterSwap` handler only called `checkPositionChange()`, NOT `attachAggressHandlers()`. This meant Buy/Sell buttons lost their vanilla JS handlers after each poll update. **FIX**: Modified `htmx:afterSwap` in market.html to call `attachAggressHandlers()` after every HTMX swap, ensuring buttons work in BOTH WebSocket mode AND polling fallback mode. See LESSONS.md for detailed explanation. **REQUIRES HUMAN VERIFICATION** - Please test with: (1) WebSocket working (should show "Live"), (2) Click Buy/Sell buttons rapidly, (3) Verify trades execute >95% of the time.
 
-- [ ] TODO-051: **HUMAN VERIFICATION REQUIRED** - After deploying TODO-049 and TODO-050 fixes, please verify in production: (1) Connection indicator shows "Live" (not "Polling"), (2) Buy/Sell buttons work reliably (>95% success rate), (3) No 404 errors for `/ws/market/...` in Render logs. If issues persist, check browser console for `[AGGRESS]` logs when clicking buttons.
+- [x] TODO-051: **HUMAN VERIFICATION** - Render logs confirm: (1) "AGGRESS REQUEST RECEIVED" messages appearing, (2) Requests returning 200 OK, (3) Buttons ARE working. **HOWEVER** - new issue discovered: requests are SLOW (2.6-3.5 seconds). See TODO-052.
+
+- [ ] TODO-052: **PERFORMANCE - Aggress requests are SLOW (2.6-3.5 seconds)** - Render logs show:
+    ```
+    SLOW: aggress matching took 2613.88ms (user=chrson)
+    SLOW REQUEST: POST /orders/.../aggress took 3486.60ms
+    ```
+    This is unacceptable for a trading app - should be <200ms.
+
+    **INVESTIGATE**:
+    1. Is it database latency? Neon free tier may have cold start or connection overhead
+    2. Is it the matching logic? Check for N+1 queries or inefficient lookups
+    3. Is it connection pooling? Are connections being reused properly?
+    4. Is it WebSocket broadcast? Check time spent broadcasting vs matching
+
+    **ALSO SLOW**: `/partials/market/...` polling takes 9+ seconds (9605ms in logs)
+
+    **DEBUGGING STEPS**:
+    - Add timing logs to EACH database query in the aggress flow
+    - Check if first request is slower than subsequent (cold start)
+    - Test with local PostgreSQL to compare (eliminate network as variable)
+    - Check Neon dashboard for query performance metrics
+
+    **POSSIBLE FIXES**:
+    - Add database connection pooling (min_size, max_size params)
+    - Add indexes on frequently-queried columns (market_id, user_id, status)
+    - Cache position limits and market status (they don't change often)
+    - Reduce number of queries in matching flow
+    - Consider switching to a faster database if Neon free tier is the bottleneck
 
 <!-- Add new TODOs here with sequential IDs -->
 
